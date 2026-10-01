@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <ctime>
+#include <share.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -49,7 +50,10 @@ void Log::Init(int level)
         strcpy_s(path, "WarbandVR_log.txt");
     }
 
-    fopen_s(&g_file, path, "w");
+    // Open with read sharing so the log can be tailed live while the game
+    // runs (it is our only debugging tool in there).
+    g_file = _fsopen(path, "w", _SH_DENYNO);
+    if (!g_file) fopen_s(&g_file, path, "w");
     if (!g_csInit) { InitializeCriticalSection(&g_cs); g_csInit = true; }
     g_level = level;
 

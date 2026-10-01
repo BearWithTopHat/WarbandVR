@@ -16,8 +16,11 @@ namespace
         return h;
     }
 
-    // Heuristic classification of 16 floats as a transform matrix.
-    enum MatrixKind { MK_None, MK_ViewLike, MK_ProjLike, MK_Other };
+    // Heuristic classification of 16 floats as a transform matrix, in both
+    // row-major (CPU layout) and transposed (column-major HLSL upload)
+    // arrangements - games upload matrices in both, and a transposed matrix
+    // evades the row-major tests entirely.
+    enum MatrixKind { MK_None, MK_ViewLike, MK_ProjLike, MK_ViewLikeT, MK_ProjLikeT, MK_Other };
 
     MatrixKind ClassifyMatrix(const float* f)
     {
@@ -32,7 +35,31 @@ namespace
         // Row-major D3D perspective projection: _34 = 1, _44 = 0
         if (std::fabs(f11 - 1.0f) < 1e-3f && std::fabs(f15) < 1e-4f)
             return MK_ProjLike;
+        // Transposed affine: last ROW ~ [0,0,0,1] (translation sits in f3/f7/f11)
+        if (std::fabs(f[12]) < 1e-4f && std::fabs(f[13]) < 1e-4f &&
+            std::fabs(f[14]) < 1e-4f && std::fabs(f15 - 1.0f) < 1e-3f)
+            return MK_ViewLikeT;
+        // Transposed D3D perspective projection: _43 = 1, _44 = 0
+        if (std::fabs(f[14] - 1.0f) < 1e-3f && std::fabs(f15) < 1e-4f)
+            return MK_ProjLikeT;
         return MK_Other;
+    }
+
+    bool IsMatrixLike(MatrixKind k)
+    {
+        return k == MK_ViewLike || k == MK_ProjLike || k == MK_ViewLikeT || k == MK_ProjLikeT;
+    }
+
+    const char* KindName(MatrixKind k)
+    {
+        switch (k)
+        {
+        case MK_ViewLike:  return "view";
+        case MK_ProjLike:  return "proj";
+        case MK_ViewLikeT: return "viewT";
+        case MK_ProjLikeT: return "projT";
+        default:           return "?";
+        }
     }
 
     struct FrameStats
@@ -41,27 +68,55 @@ namespace
         int setTransformProj = 0;
         unsigned lastViewSum = 0;
         unsigned lastProjSum = 0;
-
-        struct RegStat
-        {
-            int writes = 0;
-            unsigned lastSum = 0;
-            int viewLike = 0;
-            int projLike = 0;
-        };
-        RegStat regs[256];
         int vsWritesTotal = 0;
 
         void Reset()
         {
             setTransformView = setTransformProj = 0;
             vsWritesTotal = 0;
-            memset(regs, 0, sizeof(regs));
         }
     };
 
     FrameStats g_stats;
     unsigned long long g_frame = 0;
+
+    // Shadow copy of all 256 VS float4 registers (4 KB), plus the frame each
+    // register was last written. Lets us classify matrices regardless of how
+    // the game chunks its SetVertexShaderConstantF calls (a 4x4 written as
+    // four single-register writes is invisible to per-call classification).
+    float g_vsShadow[256 * 4] = {};
+    unsigned long long g_vsWritten[256] = {};
+    bool g_vsSeeded = false;
+
+    // Rank aligned 4-register windows by matrix-likeness and freshness.
+    // Returns the count of candidates written into `out` (capacity 8).
+    struct Candidate { int base; MatrixKind kind; unsigned sum; bool fresh; };
+    int RankCandidates(Candidate* out, int capacity)
+    {
+        int n = 0;
+        for (int base = 0; base <= 252; base += 4)
+        {
+            MatrixKind kind = ClassifyMatrix(g_vsShadow + base * 4);
+            if (!IsMatrixLike(kind)) continue;
+            bool fresh = false;
+            for (int r = base; r < base + 4; ++r)
+                if (g_vsWritten[r] == g_frame) { fresh = true; break; }
+            if (n < capacity)
+            {
+                out[n].base = base;
+                out[n].kind = kind;
+                out[n].sum  = Fnv1a(g_vsShadow + base * 4, 16 * sizeof(float));
+                out[n].fresh = fresh;
+                ++n;
+            }
+        }
+        // Fresh (written this frame) candidates first; stable otherwise.
+        for (int i = 0; i < n; ++i)
+            for (int j = i + 1; j < n; ++j)
+                if (out[j].fresh && !out[i].fresh)
+                { Candidate t = out[i]; out[i] = out[j]; out[j] = t; }
+        return n;
+    }
 }
 
 void Capture::BeginFrame()
@@ -87,22 +142,18 @@ void Capture::OnSetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* m)
 
 void Capture::OnSetVSConstantF(UINT startRegister, const float* data, UINT count4)
 {
-    if (Config::Get().captureMode != 2 || !data || startRegister > 255) return;
+    const int mode = Config::Get().captureMode;
+    if (mode < 2 || !data || startRegister > 255) return;
 
     g_stats.vsWritesTotal += count4;
 
-    // A matrix write covers >= 4 consecutive float4 registers; credit each.
-    for (UINT r = startRegister; r < startRegister + count4 && r < 256; ++r)
-        ++g_stats.regs[r].writes;
-
-    if (count4 >= 4)
+    const UINT end = (startRegister + count4 > 256) ? 256 : startRegister + count4;
+    for (UINT r = startRegister; r < end; ++r)
     {
-        MatrixKind kind = ClassifyMatrix(data);
-        FrameStats::RegStat& s = g_stats.regs[startRegister];
-        s.lastSum = Fnv1a(data, 16 * sizeof(float));
-        if (kind == MK_ViewLike) ++s.viewLike;
-        if (kind == MK_ProjLike) ++s.projLike;
+        memcpy(g_vsShadow + r * 4, data + (r - startRegister) * 4, 4 * sizeof(float));
+        g_vsWritten[r] = g_frame + 1; // frame counter increments in EndFrame
     }
+    g_vsSeeded = true;
 }
 
 void Capture::EndFrame()
@@ -127,29 +178,41 @@ void Capture::EndFrame()
         return;
     }
 
-    // mode 2: dump the top candidate registers.
-    int best[5] = { -1, -1, -1, -1, -1 };
-    for (int r = 0; r < 256; ++r)
+    if (!g_vsSeeded)
     {
-        const FrameStats::RegStat& s = g_stats.regs[r];
-        if (s.writes == 0 || (s.viewLike == 0 && s.projLike == 0)) continue;
-        int score = s.viewLike * 2 + s.projLike + s.writes / 10;
-        for (int i = 0; i < 5; ++i)
-        {
-            if (best[i] == -1) { best[i] = r; break; }
-            const FrameStats::RegStat& b = g_stats.regs[best[i]];
-            int bscore = b.viewLike * 2 + b.projLike + b.writes / 10;
-            if (score > bscore) { for (int j = 4; j > i; --j) best[j] = best[j - 1]; best[i] = r; break; }
-        }
+        if ((g_frame % 60) == 0)
+            LOG_INFO("[CAPTURE f=%llu] no VS constant writes yet (in a 3D scene?)", g_frame);
+        return;
     }
 
-    LOG_INFO("[CAPTURE f=%llu] VS constant writes=%d; matrix-like candidates:", g_frame, g_stats.vsWritesTotal);
-    for (int i = 0; i < 5 && best[i] != -1; ++i)
+    Candidate cand[8];
+    int n = RankCandidates(cand, 8);
+
+    if (mode == 2)
     {
-        const FrameStats::RegStat& s = g_stats.regs[best[i]];
-        LOG_INFO("  c%-3d writes=%-4d viewLike=%-3d projLike=%-3d sum=%08X",
-                 best[i], s.writes, s.viewLike, s.projLike, s.lastSum);
+        // Compact per-frame ranking of matrix-like register windows.
+        LOG_INFO("[CAPTURE f=%llu] VS writes=%d; matrix-like windows:", g_frame, g_stats.vsWritesTotal);
+        for (int i = 0; i < n; ++i)
+            LOG_INFO("  c%-3d %-5s sum=%08X%s", cand[i].base, KindName(cand[i].kind), cand[i].sum,
+                     cand[i].fresh ? " (written this frame)" : "");
+        if (n == 0)
+            LOG_INFO("  (none)");
+        return;
     }
-    if (best[0] == -1)
-        LOG_INFO("  (none this frame)");
+
+    // mode 3: periodic full dump of candidate windows for manual analysis.
+    if ((g_frame % 60) != 0) return;
+    LOG_INFO("[CAPTURE f=%llu] VS writes=%d; dumping %d matrix-like window(s):",
+             g_frame, g_stats.vsWritesTotal, n);
+    for (int i = 0; i < n; ++i)
+    {
+        char buf[640];
+        D3DMATRIX m;
+        memcpy(&m, g_vsShadow + cand[i].base * 4, sizeof(m));
+        Mat::Format(m, buf, sizeof(buf));
+        LOG_INFO("  c%-3d %-5s%s :%s", cand[i].base, KindName(cand[i].kind),
+                 cand[i].fresh ? " fresh" : "", buf);
+    }
+    if (n == 0)
+        LOG_INFO("  (none)");
 }

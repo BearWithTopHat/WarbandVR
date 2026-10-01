@@ -8,8 +8,9 @@
 // Driven by [Debug] CaptureMode:
 //   0 = off (zero overhead beyond one branch)
 //   1 = aggregate SetTransform VIEW/PROJECTION calls per frame
-//   2 = aggregate SetVertexShaderConstantF writes per frame, with a
-//       plausibility ranking of which registers hold view/proj matrices
+//   2 = per-frame ranking of VS register windows holding matrix-like data
+//       (shadows all 256 registers, so chunked writes are caught too)
+//   3 = like 2, plus a full dump of candidate matrices every 60 frames
 
 #include <d3d9.h>
 

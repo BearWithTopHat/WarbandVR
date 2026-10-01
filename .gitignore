@@ -3,3 +3,6 @@ Release/
 Debug/
 WarbandVR/
 *.user
+
+# Captured game logs (analysis artifacts, too big for git)
+docs/*log*.txt
