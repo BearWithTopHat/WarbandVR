@@ -93,6 +93,7 @@
     <ClCompile Include="src\Logger.cpp" />
     <ClCompile Include="src\Config.cpp" />
     <ClCompile Include="src\D3D9Proxy.cpp" />
+    <ClCompile Include="src\DeviceProxy.cpp" />
     <ClCompile Include="src\D3D9ExProxy.cpp" />
     <ClCompile Include="src\DeviceHooks.cpp" />
     <ClCompile Include="src\StereoRenderer.cpp" />
@@ -104,9 +105,9 @@
     <ClInclude Include="src\Logger.h" />
     <ClInclude Include="src\Config.h" />
     <ClInclude Include="src\D3D9Proxy.h" />
+    <ClInclude Include="src\DeviceProxy.h" />
     <ClInclude Include="src\D3D9ExProxy.h" />
     <ClInclude Include="src\DeviceHooks.h" />
-    <ClInclude Include="src\VTableHook.h" />
     <ClInclude Include="src\StereoRenderer.h" />
     <ClInclude Include="src\MathUtil.h" />
     <ClInclude Include="src\Capture.h" />

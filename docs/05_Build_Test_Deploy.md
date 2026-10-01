@@ -41,7 +41,7 @@ library outside Program Files — recommended; saves a lot of friction.)
    menu, load a save, walk 30 seconds. Rendering must be indistinguishable
    from vanilla.
    `WarbandVR_log.txt` must show: proxy init → `CreateDevice` →
-   `18/18 vtable hooks installed` → no `ERR` lines.
+   `Device created OK (real=... proxy=...)` → no `ERR` lines.
 2. **Feature on.** Flip only the flag under test. Verify the feature.
 3. **Stability probes:** alt-tab out and back; toggle fullscreen/windowed;
    trigger a battle load screen. (These all exercise `Reset` — historically

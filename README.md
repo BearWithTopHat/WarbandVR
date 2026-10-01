@@ -15,9 +15,9 @@ to the Steam Frame works exactly like the flat game already does for you.
 |---|---|
 | d3d9.dll proxy + export forwarding | Implemented |
 | IDirect3D9 **and IDirect3D9Ex** wrappers, device capture | Implemented |
-| 18 vtable hooks (draw calls, transforms, scene lifecycle, render state, texture, depth) | Implemented |
-| Per-eye draw duplication into a double-width target | Implemented |
-| Stereo depth-stencil substitution (D3D9 legality for the 2W target) | Implemented |
+| DeviceProxy: full device wrapper (134 methods), 18 intercepted | Implemented — **immune to Steam overlay vtable swaps** |
+| Per-eye draw duplication into a double-width target | Implemented — **verified running on the real game** |
+| Stereo depth-stencil substitution (D3D9 legality for the 2W target) | Implemented — verified on the real game |
 | Side-by-side monitor output | Implemented |
 | M0 capture tooling (view-source detector, VS register ranker) | **Implemented — human runs it** (docs/00, docs/04) |
 | M0 memory scanner (camera-struct candidate finder) | **Implemented — human runs it** |
@@ -28,16 +28,17 @@ to the Steam Frame works exactly like the flat game already does for you.
 | Asymmetric (off-center) projection | Implemented (off by default) |
 | Head-tracking pipeline (pose composition, OneEuro smoothing, menu lock, recenter key) | Implemented — waits on M3 pose source |
 | Perf instrumentation (duplication cost logging) | Implemented |
-| View matrix source (SetTransform vs shader constant) | **M0 run pending** — one capture session answers it |
+| View matrix source (SetTransform vs shader constant) | Likely **shader-driven** (zero `SetTransform` calls in menu/loading) — M0 run confirms register |
 | OpenXR output | Stub + implementation guide (M3) |
 | Motion controls | M5 (design written, classifier to build) |
 
-**The project builds clean on stock VS2022, and stock boot is verified on
-the real game**: proxy loads, `CreateDevice` succeeds, 18/18 hooks install,
-log stays clean with `EnableStereo=0`. Every risky feature is behind a
-config flag. **Start at `docs/00_Runbook.md`** — it's the shortest path
-from here to first stereo. Note: the game boots into a launcher dialog;
-`tools/launch_game.ps1` clicks through it for automated test runs.
+**Verified on the real game:** stock boot clean (`EnableStereo=0`), stereo
+boot clean (`EnableStereo=1` — stereo target/depth substitution active,
+survives `Reset`, no errors). Big fix this round: the Steam overlay swaps
+the device object's vtable pointer, which defeated the original vtable
+hooks; interception now happens in a full `DeviceProxy` wrapper. Note: the
+game boots into a launcher dialog; `tools/launch_game.ps1` clicks through
+it for automated test runs.
 
 ## Repo layout
 
@@ -49,7 +50,8 @@ WarbandVR/
   src/                       proxy + hooks + stereo renderer + M0 tooling
     dllmain.cpp              exports, forwarding, startup, exe version tagging
     D3D9Proxy / D3D9ExProxy  IDirect3D9(Ex) wrappers -> device capture
-    DeviceHooks              18 vtable hooks + per-eye draw duplication
+    DeviceProxy              full IDirect3DDevice9Ex wrapper (134 methods)
+    DeviceHooks              18 intercepted methods + per-eye draw duplication
     StereoRenderer           stereo target, eye math, head-delta composition
     Capture                  M0 view-source detector + VS register ranker
     CameraScan               M0 camera-struct memory scanner

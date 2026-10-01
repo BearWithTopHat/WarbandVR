@@ -1,4 +1,5 @@
 #include "D3D9ExProxy.h"
+#include "DeviceProxy.h"
 #include "DeviceHooks.h"
 #include "Logger.h"
 
@@ -107,7 +108,12 @@ HRESULT __stdcall D3D9ExProxy::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType,
     HRESULT hr = m_real->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags,
                                       pPresentationParameters, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
-        DeviceHooks::Get().OnDeviceCreated(*ppReturnedDeviceInterface, pPresentationParameters);
+    {
+        IDirect3DDevice9* realDevice = *ppReturnedDeviceInterface;
+        DeviceHooks::Get().OnDeviceCreated(realDevice, pPresentationParameters);
+        *ppReturnedDeviceInterface = new DeviceProxy(realDevice);
+        LOG_INFO("Device created OK (real=%p proxy=%p)", realDevice, *ppReturnedDeviceInterface);
+    }
     return hr;
 }
 
@@ -141,9 +147,13 @@ HRESULT __stdcall D3D9ExProxy::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceTyp
                                         ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
     {
-        // IDirect3DDevice9Ex's vtable begins with the identical IDirect3DDevice9
-        // layout, so the same indices/hooks apply unchanged.
-        DeviceHooks::Get().OnDeviceCreated(*ppReturnedDeviceInterface, pPresentationParameters);
+        // The DeviceProxy implements the base IDirect3DDevice9; if the game
+        // needs Ex device methods it must QI, which forwards to the real
+        // object (calls through that pointer bypass the proxy - logged).
+        IDirect3DDevice9* realDevice = *ppReturnedDeviceInterface;
+        DeviceHooks::Get().OnDeviceCreated(realDevice, pPresentationParameters);
+        *ppReturnedDeviceInterface = static_cast<IDirect3DDevice9Ex*>(new DeviceProxy(realDevice));
+        LOG_INFO("Device created OK (real=%p proxy=%p)", realDevice, *ppReturnedDeviceInterface);
     }
     return hr;
 }

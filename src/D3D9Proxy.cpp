@@ -1,4 +1,5 @@
 #include "D3D9Proxy.h"
+#include "DeviceProxy.h"
 #include "DeviceHooks.h"
 #include "Logger.h"
 
@@ -117,8 +118,12 @@ HRESULT __stdcall D3D9Proxy::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, H
                                       pPresentationParameters, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
     {
-        LOG_INFO("Device created OK (%p) - installing hooks", *ppReturnedDeviceInterface);
-        DeviceHooks::Get().OnDeviceCreated(*ppReturnedDeviceInterface, pPresentationParameters);
+        IDirect3DDevice9* realDevice = *ppReturnedDeviceInterface;
+        DeviceHooks::Get().OnDeviceCreated(realDevice, pPresentationParameters);
+        // Hand the game OUR wrapper: its vtable is ours and can never be
+        // swapped out from under us by overlays (see DeviceProxy.h).
+        *ppReturnedDeviceInterface = new DeviceProxy(realDevice);
+        LOG_INFO("Device created OK (real=%p proxy=%p)", realDevice, *ppReturnedDeviceInterface);
     }
     else
     {

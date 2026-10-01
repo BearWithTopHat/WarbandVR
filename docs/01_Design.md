@@ -30,7 +30,7 @@ d3d9.dll  ← WarbandVR proxy
    │              D3D9Proxy (delegating wrapper)
    │                         │ CreateDevice
    │                         ▼
-   │              DeviceHooks — vtable hooks on the real IDirect3DDevice9
+   │              DeviceProxy — FULL wrapper; the game holds OUR object
    │                         │ BeginScene → substitute double-width RT
    │                         │ SetTransform / VS-constant → capture view matrix
    │                         │ DrawPrimitive* → execute twice, once per eye
@@ -45,10 +45,17 @@ d3d9.dll  ← WarbandVR proxy
   monitor (SBS, debugging)                              Steam Frame headset
 ```
 
-Key choice: **vtable hooking**, not Detours/MinHook. COM objects are called
-through a per-class function table; we patch the table of the one device
-instance the game creates. Precise, no trampolines, no instruction patching.
-(`src/VTableHook.h`, install list in `DeviceHooks.cpp`.)
+Key choice: **a full delegating device wrapper** (`DeviceProxy`), not vtable
+patching or Detours/MinHook. The original design patched the COM vtable in
+place; on the real game the Steam overlay (`gameoverlayrenderer.dll`) swaps
+the device object's vtable pointer to its own heap shadow and restores the
+original vtable memory, which silently bypassed every hook (and the
+half-hooked intermediate state crashed stereo bring-up). A full wrapper is
+immune: the game holds our object. Intercepted methods (18) route to
+`hkXxx` detours in `DeviceHooks.cpp`; the other ~120 methods forward
+verbatim. Calls from detours into `dev->Xxx(...)` dispatch through the
+real device's current vtable, so the overlay stays in the chain and keeps
+working.
 
 ## 3. Stereo rendering strategy
 

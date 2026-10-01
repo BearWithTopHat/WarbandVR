@@ -1,24 +1,43 @@
 #pragma once
 
-// DeviceHooks: vtable-hooks the game's IDirect3DDevice9 and implements the
-// stereo strategy: duplicate every draw call once per eye with a shifted
-// view matrix, into a double-width render target.
+// DeviceHooks: stereo interception logic, invoked from DeviceProxy's
+// overrides of the 18 intercepted IDirect3DDevice9 methods.
 //
-// Hooked functions (IDirect3DDevice9 vtable indices in parentheses):
-//   Reset(16) Present(17) SetRenderTarget(37) SetDepthStencilSurface(39)
-//   BeginScene(41) EndScene(42) Clear(43) SetTransform(44) SetViewport(47)
-//   SetRenderState(57) SetTexture(65) SetScissorRect(75)
-//   DrawPrimitive(81) DrawIndexedPrimitive(82) DrawPrimitiveUP(83)
-//   DrawIndexedPrimitiveUP(84) SetVertexShaderConstantF(94) DrawRectPatch(115)
+// Interception model (see docs/06, 2026-10-01 iteration 4): DeviceProxy is a
+// full delegating wrapper - the game holds OUR object, so our vtable can
+// never be swapped or restored by overlays (the Steam overlay defeats
+// in-place vtable patching by swapping the object's vtable pointer to a
+// heap shadow). The hkXxx functions below receive the REAL device; calling
+// dev->Method(...) from them dispatches through whatever vtable the real
+// device currently has, keeping the overlay in the call chain.
 //
-// To hook additional methods: add the index to InstallHooks(), write a
-// hkXxx detour, and ALWAYS call through the stored original - never call a
-// hooked method on the device without holding g_internal (reentrancy guard).
+// Intercepted methods:
+//   Reset Present SetRenderTarget SetDepthStencilSurface
+//   BeginScene EndScene Clear SetTransform SetViewport
+//   SetRenderState SetTexture SetScissorRect
+//   DrawPrimitive DrawIndexedPrimitive DrawPrimitiveUP
+//   DrawIndexedPrimitiveUP SetVertexShaderConstantF DrawRectPatch
 
 #include <d3d9.h>
-#include <memory>
 
-class VTableHook;
+HRESULT __stdcall hkReset(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+HRESULT __stdcall hkPresent(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
+HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
+HRESULT __stdcall hkSetDepthStencilSurface(IDirect3DDevice9*, IDirect3DSurface9*);
+HRESULT __stdcall hkBeginScene(IDirect3DDevice9*);
+HRESULT __stdcall hkEndScene(IDirect3DDevice9*);
+HRESULT __stdcall hkClear(IDirect3DDevice9*, DWORD, const D3DRECT*, DWORD, D3DCOLOR, float, DWORD);
+HRESULT __stdcall hkSetTransform(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
+HRESULT __stdcall hkSetViewport(IDirect3DDevice9*, const D3DVIEWPORT9*);
+HRESULT __stdcall hkSetRenderState(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+HRESULT __stdcall hkSetTexture(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9*, const RECT*);
+HRESULT __stdcall hkDrawPrimitive(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+HRESULT __stdcall hkDrawIndexedPrimitive(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
+HRESULT __stdcall hkDrawPrimitiveUP(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT);
+HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT, const void*, D3DFORMAT, const void*, UINT);
+HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9*, UINT, const float*, UINT);
+HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9*, UINT, const float*, const D3DRECTPATCH_INFO*);
 
 class DeviceHooks
 {
@@ -34,9 +53,7 @@ public:
 
 private:
     DeviceHooks() = default;
-    void InstallHooks(IDirect3DDevice9* device);
 
     IDirect3DDevice9* m_device = nullptr;
-    std::unique_ptr<VTableHook> m_vt;
     D3DPRESENT_PARAMETERS m_pp = {};
 };

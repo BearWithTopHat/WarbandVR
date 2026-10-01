@@ -14,10 +14,10 @@ for where the project stands.
    64-bit-only APIs, or libraries without 32-bit support.
 3. **No work in DllMain.** Loader-lock rules: initialization happens lazily on
    `Direct3DCreate9`.
-4. **All hooks check `DeviceHooks::Get().m_internal` first** and pass straight
-   through when it's set. Internal D3D calls (our own viewport/matrix/target
-   changes) must always run with `m_internal = true` or they re-enter the
-   hooks and infinite-loop.
+4. **All interceptions check `DeviceHooks::Get().m_internal` first** and pass
+   straight through when it's set. Internal D3D calls (our own
+   viewport/matrix/target changes) must always run with `m_internal = true`
+   or they re-enter the interceptions and infinite-loop.
 5. **Log generously, cheaply.** Every failure path logs with `LOG_ERROR` /
    `LOG_WARN`. The log is the only debugging tool once inside the game.
 6. **Single-player only.** Never add networking code, and refuse tasks that
@@ -63,9 +63,13 @@ Test ritual after every change (details in `docs/05_Build_Test_Deploy.md`):
 - All globals live in singletons (`Config::Get()`, `StereoRenderer::Get()`,
   `DeviceHooks::Get()`). No naked static objects with non-trivial destructors
   (DLL unload ordering).
-- New D3D hooks: add the vtable index to `InstallHooks()` in
-  `DeviceHooks.cpp`, write `hkXxx`, store the original, call through it.
-  Indices are the comments in `DeviceHooks.h`; cross-check against d3d9.h.
+- New intercepted device methods: add an override in `DeviceProxy`
+  (forwarding to `hkXxx`), write `hkXxx` in `DeviceHooks.cpp`, and from it
+  call `dev->Xxx(...)` on the real device (NOT on the proxy — that would
+  recurse). We do NOT patch vtables: the Steam overlay swaps the device
+  object's vtable pointer to a heap shadow, which silently bypasses in-place
+  vtable patches (see docs/06, 2026-10-01 iteration 4). The full
+  `DeviceProxy` wrapper is immune to that.
 - Keep detours tiny. Logic belongs in `StereoRenderer` (rendering) or a new
   module (input, OpenXR) — hooks just route.
 

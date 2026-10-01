@@ -1,5 +1,4 @@
 #include "DeviceHooks.h"
-#include "VTableHook.h"
 #include "StereoRenderer.h"
 #include "Config.h"
 #include "Logger.h"
@@ -11,52 +10,10 @@
 #include <cstring>
 
 // ---------------------------------------------------------------------------
-// Original function pointers (filled by InstallHooks)
+// Shared detour machinery
 // ---------------------------------------------------------------------------
 namespace
 {
-    typedef HRESULT (__stdcall IDirect3DDevice9::*MemberFn)();
-
-    #define DECL_ORIG(name, sig) sig name = nullptr
-
-    typedef HRESULT (__stdcall *Reset_t)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
-    typedef HRESULT (__stdcall *Present_t)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
-    typedef HRESULT (__stdcall *SetRenderTarget_t)(IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
-    typedef HRESULT (__stdcall *SetDepthStencilSurface_t)(IDirect3DDevice9*, IDirect3DSurface9*);
-    typedef HRESULT (__stdcall *BeginScene_t)(IDirect3DDevice9*);
-    typedef HRESULT (__stdcall *EndScene_t)(IDirect3DDevice9*);
-    typedef HRESULT (__stdcall *Clear_t)(IDirect3DDevice9*, DWORD, const D3DRECT*, DWORD, D3DCOLOR, float, DWORD);
-    typedef HRESULT (__stdcall *SetTransform_t)(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
-    typedef HRESULT (__stdcall *SetViewport_t)(IDirect3DDevice9*, const D3DVIEWPORT9*);
-    typedef HRESULT (__stdcall *SetRenderState_t)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
-    typedef HRESULT (__stdcall *SetTexture_t)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
-    typedef HRESULT (__stdcall *SetScissorRect_t)(IDirect3DDevice9*, const RECT*);
-    typedef HRESULT (__stdcall *DrawPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
-    typedef HRESULT (__stdcall *DrawIndexedPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
-    typedef HRESULT (__stdcall *DrawPrimitiveUP_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT);
-    typedef HRESULT (__stdcall *DrawIndexedPrimitiveUP_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT, const void*, D3DFORMAT, const void*, UINT);
-    typedef HRESULT (__stdcall *SetVertexShaderConstantF_t)(IDirect3DDevice9*, UINT, const float*, UINT);
-    typedef HRESULT (__stdcall *DrawRectPatch_t)(IDirect3DDevice9*, UINT, const float*, const D3DRECTPATCH_INFO*);
-
-    DECL_ORIG(o_Reset, Reset_t);
-    DECL_ORIG(o_Present, Present_t);
-    DECL_ORIG(o_SetRenderTarget, SetRenderTarget_t);
-    DECL_ORIG(o_SetDepthStencilSurface, SetDepthStencilSurface_t);
-    DECL_ORIG(o_BeginScene, BeginScene_t);
-    DECL_ORIG(o_EndScene, EndScene_t);
-    DECL_ORIG(o_Clear, Clear_t);
-    DECL_ORIG(o_SetTransform, SetTransform_t);
-    DECL_ORIG(o_SetViewport, SetViewport_t);
-    DECL_ORIG(o_SetRenderState, SetRenderState_t);
-    DECL_ORIG(o_SetTexture, SetTexture_t);
-    DECL_ORIG(o_SetScissorRect, SetScissorRect_t);
-    DECL_ORIG(o_DrawPrimitive, DrawPrimitive_t);
-    DECL_ORIG(o_DrawIndexedPrimitive, DrawIndexedPrimitive_t);
-    DECL_ORIG(o_DrawPrimitiveUP, DrawPrimitiveUP_t);
-    DECL_ORIG(o_DrawIndexedPrimitiveUP, DrawIndexedPrimitiveUP_t);
-    DECL_ORIG(o_SetVertexShaderConstantF, SetVertexShaderConstantF_t);
-    DECL_ORIG(o_DrawRectPatch, DrawRectPatch_t);
-
     // Execute one game draw call for both eyes. `draw` invokes the ORIGINAL.
     // primCount drives the UI heuristic: tiny batches (HUD text, icons) are
     // drawn once, mono, when SBSMonoUI is on - doubling them buys nothing and
@@ -104,34 +61,34 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// Detours
+// Detours (invoked from DeviceProxy overrides; `dev` is the REAL device)
 // ---------------------------------------------------------------------------
 HRESULT __stdcall hkReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
 {
-    if (DeviceHooks::Get().m_internal) return o_Reset(dev, pp);
+    if (DeviceHooks::Get().m_internal) return dev->Reset(pp);
     LOG_INFO("Reset(%ux%u)", pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0);
     StereoRenderer::Get().OnReset(dev, pp);       // release DEFAULT-pool stuff FIRST
-    HRESULT hr = o_Reset(dev, pp);
+    HRESULT hr = dev->Reset(pp);
     if (SUCCEEDED(hr)) LOG_INFO("Reset succeeded"); else LOG_ERROR("Reset failed hr=0x%08X", hr);
     return hr;
 }
 
 HRESULT __stdcall hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d, HWND w, const RGNDATA* r)
 {
-    if (DeviceHooks::Get().m_internal) return o_Present(dev, s, d, w, r);
+    if (DeviceHooks::Get().m_internal) return dev->Present(s, d, w, r);
     if (StereoOn())
     {
         DeviceHooks::Get().m_internal = true;
         StereoRenderer::Get().OnPresent(dev);
         DeviceHooks::Get().m_internal = false;
     }
-    return o_Present(dev, s, d, w, r);
+    return dev->Present(s, d, w, r);
 }
 
 HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DSurface9* surf)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_SetRenderTarget(dev, idx, surf);
+        return dev->SetRenderTarget(idx, surf);
 
     // Routed through StereoRenderer: re-applies the stereo substitution when
     // the game returns to its main target, and (M2, OffscreenPasses=1) gives
@@ -145,7 +102,7 @@ HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DS
 HRESULT __stdcall hkSetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurface9* ds)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_SetDepthStencilSurface(dev, ds);
+        return dev->SetDepthStencilSurface(ds);
 
     // The game re-pointing the depth buffer mid-frame would pair its small
     // depth surface with our double-width target (illegal in D3D9); the
@@ -158,9 +115,9 @@ HRESULT __stdcall hkSetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurfa
 
 HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
 {
-    if (DeviceHooks::Get().m_internal) return o_BeginScene(dev);
+    if (DeviceHooks::Get().m_internal) return dev->BeginScene();
     Capture::BeginFrame();
-    HRESULT hr = o_BeginScene(dev);
+    HRESULT hr = dev->BeginScene();
     if (SUCCEEDED(hr))
     {
         DeviceHooks::Get().m_internal = true;
@@ -172,18 +129,18 @@ HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
 
 HRESULT __stdcall hkEndScene(IDirect3DDevice9* dev)
 {
-    if (DeviceHooks::Get().m_internal) return o_EndScene(dev);
+    if (DeviceHooks::Get().m_internal) return dev->EndScene();
     Capture::EndFrame();
     CameraScan::OnFrame();
     StereoRenderer::Get().OnEndScene(dev);
-    return o_EndScene(dev);
+    return dev->EndScene();
 }
 
 HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rects,
                           DWORD flags, D3DCOLOR color, float z, DWORD stencil)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_Clear(dev, count, rects, flags, color, z, stencil);
+        return dev->Clear(count, rects, flags, color, z, stencil);
 
     // While a shadow pass is bound the target is per-eye (game-sized), so
     // Clear must run once per eye with unshifted rects.
@@ -198,7 +155,7 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
     if (rects == nullptr)
     {
         // Whole-target clear covers both eyes in one call.
-        return o_Clear(dev, count, rects, flags, color, z, stencil);
+        return dev->Clear(count, rects, flags, color, z, stencil);
     }
 
     // Region clears are in surface coordinates, so they must be duplicated
@@ -217,7 +174,7 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
             eyeRects[i].y1 = rects[i].y1;
             eyeRects[i].y2 = rects[i].y2;
         }
-        hr = o_Clear(dev, count, eyeRects.data(), flags, color, z, stencil);
+        hr = dev->Clear(count, eyeRects.data(), flags, color, z, stencil);
     }
     return hr;
 }
@@ -236,7 +193,7 @@ HRESULT __stdcall hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE st
                 StereoRenderer::Get().CaptureProjectionMatrix(*m);
         }
     }
-    return o_SetTransform(dev, state, m);
+    return dev->SetTransform(state, m);
 }
 
 HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
@@ -245,23 +202,14 @@ HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
     // viewports even when the game changes it mid-frame.
     if (!DeviceHooks::Get().m_internal && vp)
         StereoRenderer::Get().SetGameViewport(*vp);
-    return o_SetViewport(dev, vp);
-}
-
-HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9* dev, const RECT* rect)
-{
-    // Track the game's intended rect; ApplyEye re-applies it per eye with a
-    // horizontal offset when the scissor test is enabled.
-    if (!DeviceHooks::Get().m_internal && rect)
-        StereoRenderer::Get().SetGameScissorRect(*rect);
-    return o_SetScissorRect(dev, rect);
+    return dev->SetViewport(vp);
 }
 
 HRESULT __stdcall hkSetRenderState(IDirect3DDevice9* dev, D3DRENDERSTATETYPE state, DWORD value)
 {
     if (!DeviceHooks::Get().m_internal && state == D3DRS_SCISSORTESTENABLE)
         StereoRenderer::Get().SetScissorTestEnabled(value != 0);
-    return o_SetRenderState(dev, state, value);
+    return dev->SetRenderState(state, value);
 }
 
 HRESULT __stdcall hkSetTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* tex)
@@ -270,33 +218,42 @@ HRESULT __stdcall hkSetTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBase
     // swap in the per-eye copy (cheap no-op when no shadows exist).
     if (!DeviceHooks::Get().m_internal && StereoOn())
         StereoRenderer::Get().OnGameSetTexture(stage, tex);
-    return o_SetTexture(dev, stage, tex);
+    return dev->SetTexture(stage, tex);
+}
+
+HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9* dev, const RECT* rect)
+{
+    // Track the game's intended rect; ApplyEye re-applies it per eye with a
+    // horizontal offset when the scissor test is enabled.
+    if (!DeviceHooks::Get().m_internal && rect)
+        StereoRenderer::Get().SetGameScissorRect(*rect);
+    return dev->SetScissorRect(rect);
 }
 
 HRESULT __stdcall hkDrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT start, UINT count)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_DrawPrimitive(dev, type, start, count);
+        return dev->DrawPrimitive(type, start, count);
     return DrawBothEyes(dev, static_cast<int>(count),
-                        [&] { return o_DrawPrimitive(dev, type, start, count); });
+                        [&] { return dev->DrawPrimitive(type, start, count); });
 }
 
 HRESULT __stdcall hkDrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex,
                                          UINT minIndex, UINT numVertices, UINT startIndex, UINT count)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_DrawIndexedPrimitive(dev, type, baseVertex, minIndex, numVertices, startIndex, count);
+        return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count);
     return DrawBothEyes(dev, static_cast<int>(count), [&] {
-        return o_DrawIndexedPrimitive(dev, type, baseVertex, minIndex, numVertices, startIndex, count); });
+        return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count); });
 }
 
 HRESULT __stdcall hkDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT count,
                                     const void* data, UINT stride)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_DrawPrimitiveUP(dev, type, count, data, stride);
+        return dev->DrawPrimitiveUP(type, count, data, stride);
     return DrawBothEyes(dev, static_cast<int>(count),
-                        [&] { return o_DrawPrimitiveUP(dev, type, count, data, stride); });
+                        [&] { return dev->DrawPrimitiveUP(type, count, data, stride); });
 }
 
 HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
@@ -305,9 +262,9 @@ HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETY
                                            const void* vertexData, UINT stride)
 {
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_DrawIndexedPrimitiveUP(dev, type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride);
+        return dev->DrawIndexedPrimitiveUP(type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride);
     return DrawBothEyes(dev, static_cast<int>(count), [&] {
-        return o_DrawIndexedPrimitiveUP(dev, type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride); });
+        return dev->DrawIndexedPrimitiveUP(type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride); });
 }
 
 HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, const float* data, UINT count)
@@ -326,7 +283,7 @@ HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, co
             StereoRenderer::Get().CaptureViewMatrix(m);
         }
     }
-    return o_SetVertexShaderConstantF(dev, reg, data, count);
+    return dev->SetVertexShaderConstantF(reg, data, count);
 }
 
 HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9* dev, UINT handle, const float* segs, const D3DRECTPATCH_INFO* info)
@@ -334,12 +291,12 @@ HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9* dev, UINT handle, const floa
     // Patches are essentially unused by Warband; duplicate anyway for safety.
     // (No primitive count available - pass -1 so the UI heuristic never fires.)
     if (DeviceHooks::Get().m_internal || !StereoOn())
-        return o_DrawRectPatch(dev, handle, segs, info);
-    return DrawBothEyes(dev, -1, [&] { return o_DrawRectPatch(dev, handle, segs, info); });
+        return dev->DrawRectPatch(handle, segs, info);
+    return DrawBothEyes(dev, -1, [&] { return dev->DrawRectPatch(handle, segs, info); });
 }
 
 // ---------------------------------------------------------------------------
-// Installation
+// Device lifecycle
 // ---------------------------------------------------------------------------
 DeviceHooks& DeviceHooks::Get()
 {
@@ -349,51 +306,12 @@ DeviceHooks& DeviceHooks::Get()
 
 void DeviceHooks::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
 {
-    Shutdown(); // in case of a second device (rare, but be safe)
     m_device = device;
     if (pp) m_pp = *pp;
-    InstallHooks(device);
     StereoRenderer::Get().OnDeviceCreated(device, pp);
 }
 
 void DeviceHooks::Shutdown()
 {
-    if (m_vt) { m_vt->UnhookAll(); m_vt.reset(); }
     m_device = nullptr;
-}
-
-void DeviceHooks::InstallHooks(IDirect3DDevice9* device)
-{
-    m_vt = std::make_unique<VTableHook>(device);
-
-    struct { int index; void* detour; void** original; const char* name; } hooks[] = {
-        { 16,  &hkReset,                   reinterpret_cast<void**>(&o_Reset),                   "Reset" },
-        { 17,  &hkPresent,                 reinterpret_cast<void**>(&o_Present),                 "Present" },
-        { 37,  &hkSetRenderTarget,         reinterpret_cast<void**>(&o_SetRenderTarget),         "SetRenderTarget" },
-        { 39,  &hkSetDepthStencilSurface,  reinterpret_cast<void**>(&o_SetDepthStencilSurface),  "SetDepthStencilSurface" },
-        { 41,  &hkBeginScene,              reinterpret_cast<void**>(&o_BeginScene),              "BeginScene" },
-        { 42,  &hkEndScene,                reinterpret_cast<void**>(&o_EndScene),                "EndScene" },
-        { 43,  &hkClear,                   reinterpret_cast<void**>(&o_Clear),                   "Clear" },
-        { 44,  &hkSetTransform,            reinterpret_cast<void**>(&o_SetTransform),            "SetTransform" },
-        { 47,  &hkSetViewport,             reinterpret_cast<void**>(&o_SetViewport),             "SetViewport" },
-        { 57,  &hkSetRenderState,          reinterpret_cast<void**>(&o_SetRenderState),          "SetRenderState" },
-        { 65,  &hkSetTexture,              reinterpret_cast<void**>(&o_SetTexture),              "SetTexture" },
-        { 75,  &hkSetScissorRect,          reinterpret_cast<void**>(&o_SetScissorRect),          "SetScissorRect" },
-        { 81,  &hkDrawPrimitive,           reinterpret_cast<void**>(&o_DrawPrimitive),           "DrawPrimitive" },
-        { 82,  &hkDrawIndexedPrimitive,    reinterpret_cast<void**>(&o_DrawIndexedPrimitive),    "DrawIndexedPrimitive" },
-        { 83,  &hkDrawPrimitiveUP,         reinterpret_cast<void**>(&o_DrawPrimitiveUP),         "DrawPrimitiveUP" },
-        { 84,  &hkDrawIndexedPrimitiveUP,  reinterpret_cast<void**>(&o_DrawIndexedPrimitiveUP),  "DrawIndexedPrimitiveUP" },
-        { 94,  &hkSetVertexShaderConstantF,reinterpret_cast<void**>(&o_SetVertexShaderConstantF),"SetVertexShaderConstantF" },
-        { 115, &hkDrawRectPatch,           reinterpret_cast<void**>(&o_DrawRectPatch),           "DrawRectPatch" },
-    };
-
-    int ok = 0;
-    for (auto& h : hooks)
-    {
-        if (m_vt->Hook(h.index, h.detour, h.original))
-            ++ok;
-        else
-            LOG_ERROR("Failed to hook %s (index %d)", h.name, h.index);
-    }
-    LOG_INFO("DeviceHooks: %d/%zu vtable hooks installed on device %p", ok, std::size(hooks), device);
 }

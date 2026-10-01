@@ -75,6 +75,18 @@ offsets in docs/04 §Results with build tag; decision logged.
 ```
 Task: Bring up side-by-side stereo (EnableStereo=1, OutputMode=0).
 
+> Update 2026-10-01 (fourth iteration): the startup crash is FIXED. Root
+> cause was not in the stereo path at all: the Steam overlay swaps the
+> device object's vtable pointer to a heap shadow, so the original vtable
+> hooks never fired and the half-patched state killed the game. Interception
+> now happens in a full DeviceProxy wrapper (the game holds our object).
+> Verified on-game: stereo substitution + per-eye duplication run with a
+> clean log and survive Reset. ALSO: Warband never called SetTransform once
+> during menu/loading - it is almost certainly shader-driven, so M0-1 should
+> expect ViewSource=1 and run CaptureMode=2 in a 3D scene (battle), not on
+> the menu. Remaining M1-1 work is visual: SBS correctness, parallax, UI
+> artifacts, scale tuning - all human-judged.
+
 Context: duplication path, SBS composite, UI mono-draw heuristic
 (SBSMonoUI/UIMaxTriangles), viewport tracking, and per-eye clears are
 implemented. ViewSource comes from M0-1. Your job is triage and fixes from

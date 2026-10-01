@@ -114,6 +114,32 @@ its device after Play is pressed. `tools/launch_game.ps1` clicks the Play
 button (dialog control ID 1029, same technique as the WarbandX launcher) so
 automated smoke tests reach the game.
 
+### 2026-10-01 (iteration 4) — Full device wrapper replaces vtable hooks
+The M1 crash hunt (`EnableStereo=1` died ~15s after CreateDevice with an
+empty log) revealed something worse than a crash: **the vtable hooks never
+fired at all**, even in stock runs. A vtable watchdog showed our patches
+landing, then the entries returning to the original d3d9 addresses within
+~200 ms, with the device object's vtable pointer redirected to a
+heap-allocated shadow vtable. Culprit: **Steam's gameoverlayrenderer.dll**
+(loaded in every Steam session) — its known technique of swapping the
+object's vtable pointer to its own copy and restoring the original memory.
+Every in-place vtable patch is silently bypassed; the stock-boot "success"
+was vacuous (the mod was inert), and the stereo crash came from whatever
+undefined state the partially-patched window produced.
+Decision: implement the full delegating device wrapper (`DeviceProxy`, 134
+methods implementing `IDirect3DDevice9Ex`, generated from the SDK header) —
+the option design doc §2 had reserved for exactly this case. The game holds
+our object; no overlay can swap or restore our vtable. The 18 intercepted
+methods still route to the same `hkXxx` detours; those now call
+`dev->Xxx(...)` on the real device so the overlay remains in the call
+chain and keeps working. `VTableHook.h` deleted.
+Verified on the real game: stock boot clean; `EnableStereo=1` no longer
+crashes — stereo target + depth substitution active, per-eye duplication
+running, `Reset` survived, zero ERR/WARN in 60s.
+Bonus finding: Warband never calls `SetTransform` (menu/loading) — it is
+almost certainly fully shader-driven, so expect `ViewSource=1`; the M0
+capture must run in a 3D scene to rank VS registers.
+
 ## Session log
 
 - **2026-10-01** — Scaffold created: proxy, IDirect3D9 wrapper, 15 device
@@ -137,3 +163,15 @@ automated smoke tests reach the game.
   smoke test: stock boot with proxy, CreateDevice OK, 18/18 hooks, clean
   log — invariant 1 verified on the real game. Next action: human M0
   capture protocol (runbook Phase 2), then M1 stereo bring-up.
+- **2026-10-01 (iteration 4)** — Root-caused the `EnableStereo=1` startup
+  crash: vtable hooks never fired because Steam's gameoverlayrenderer swaps
+  the device object's vtable pointer to a heap shadow (watchdog + module
+  dump proved it). Replaced vtable hooking with a full `DeviceProxy`
+  wrapper (134 methods; the 18 intercepted ones route to the same hkXxx
+  detours, which now chain through the real device's live vtable so the
+  overlay keeps working). Verified on the real game: stock boot clean;
+  stereo boot clean — substitution active, Reset survived, zero ERR/WARN.
+  Also learned: Warband never calls `SetTransform` (menu/loading) → likely
+  fully shader-driven (`ViewSource=1`); M0 capture needs a 3D scene. Next
+  action: human runs CaptureMode=2 in a battle to identify the VS view
+  register, then visual SBS check.
