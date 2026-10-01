@@ -86,7 +86,9 @@ namespace
 // Exports we implement
 // ---------------------------------------------------------------------------
 
-extern "C" __declspec(dllexport)
+// All exports are listed in WarbandVR.def; marking them __declspec(dllexport)
+// here would clash with d3d9.h's own declarations (C2375), so we don't.
+extern "C"
 IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion)
 {
     Startup();
@@ -106,7 +108,7 @@ IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion)
     return new D3D9Proxy(realObj);
 }
 
-extern "C" __declspec(dllexport)
+extern "C"
 HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D)
 {
     Startup();
@@ -132,70 +134,70 @@ HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D)
 // Forwarded exports (thin pass-throughs, resolved at runtime)
 // ---------------------------------------------------------------------------
 
-extern "C" __declspec(dllexport) void* WINAPI Direct3DShaderValidatorCreate9()
+extern "C" void* WINAPI Direct3DShaderValidatorCreate9()
 {
     typedef void* (WINAPI *Fn)();
     static Fn real = reinterpret_cast<Fn>(RealProc("Direct3DShaderValidatorCreate9"));
     return real ? real() : nullptr;
 }
 
-extern "C" __declspec(dllexport) int WINAPI D3DPERF_BeginEvent(D3DCOLOR color, LPCWSTR name)
+extern "C" int WINAPI D3DPERF_BeginEvent(D3DCOLOR color, LPCWSTR name)
 {
     typedef int (WINAPI *Fn)(D3DCOLOR, LPCWSTR);
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_BeginEvent"));
     return real ? real(color, name) : 0;
 }
 
-extern "C" __declspec(dllexport) int WINAPI D3DPERF_EndEvent()
+extern "C" int WINAPI D3DPERF_EndEvent()
 {
     typedef int (WINAPI *Fn)();
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_EndEvent"));
     return real ? real() : 0;
 }
 
-extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetMarker(D3DCOLOR color, LPCWSTR name)
+extern "C" void WINAPI D3DPERF_SetMarker(D3DCOLOR color, LPCWSTR name)
 {
     typedef void (WINAPI *Fn)(D3DCOLOR, LPCWSTR);
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_SetMarker"));
     if (real) real(color, name);
 }
 
-extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetRegion(DWORD color, LPCWSTR name)
+extern "C" void WINAPI D3DPERF_SetRegion(DWORD color, LPCWSTR name)
 {
     typedef void (WINAPI *Fn)(DWORD, LPCWSTR);
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_SetRegion"));
     if (real) real(color, name);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI D3DPERF_QueryRepeatFrame()
+extern "C" BOOL WINAPI D3DPERF_QueryRepeatFrame()
 {
     typedef BOOL (WINAPI *Fn)();
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_QueryRepeatFrame"));
     return real ? real() : FALSE;
 }
 
-extern "C" __declspec(dllexport) void WINAPI D3DPERF_SetOptions(DWORD options)
+extern "C" void WINAPI D3DPERF_SetOptions(DWORD options)
 {
     typedef void (WINAPI *Fn)(DWORD);
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_SetOptions"));
     if (real) real(options);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI D3DPERF_GetStatus()
+extern "C" DWORD WINAPI D3DPERF_GetStatus()
 {
     typedef DWORD (WINAPI *Fn)();
     static Fn real = reinterpret_cast<Fn>(RealProc("D3DPERF_GetStatus"));
     return real ? real() : 0;
 }
 
-extern "C" __declspec(dllexport) void WINAPI DebugSetMute()
+extern "C" void WINAPI DebugSetMute()
 {
     typedef void (WINAPI *Fn)();
     static Fn real = reinterpret_cast<Fn>(RealProc("DebugSetMute"));
     if (real) real();
 }
 
-extern "C" __declspec(dllexport) int WINAPI DebugSetLevel(DWORD level)
+extern "C" int WINAPI DebugSetLevel(DWORD level)
 {
     typedef int (WINAPI *Fn)(DWORD);
     static Fn real = reinterpret_cast<Fn>(RealProc("DebugSetLevel"));

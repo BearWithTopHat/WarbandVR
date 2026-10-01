@@ -53,7 +53,12 @@ HRESULT __stdcall D3D9Proxy::GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3D
     return m_real->GetAdapterIdentifier(Adapter, Flags, pIdentifier);
 }
 
-UINT __stdcall D3D9Proxy::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode)
+UINT __stdcall D3D9Proxy::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format)
+{
+    return m_real->GetAdapterModeCount(Adapter, Format);
+}
+
+HRESULT __stdcall D3D9Proxy::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode)
 {
     return m_real->EnumAdapterModes(Adapter, Format, Mode, pMode);
 }

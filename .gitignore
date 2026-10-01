@@ -1,0 +1,5 @@
+# Build outputs (never commit; deploy from a committed tree instead)
+Release/
+Debug/
+WarbandVR/
+*.user
