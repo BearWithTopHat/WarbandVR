@@ -86,6 +86,7 @@ void Config::Load()
     logLevel             = GetPrivateProfileIntA("Debug", "LogLevel", logLevel, path);
     logViewMatrices      = GetPrivateProfileIntA("Debug", "LogViewMatrices", logViewMatrices, path);
     captureMode          = GetPrivateProfileIntA("Debug", "CaptureMode", captureMode, path);
+    dumpFrames           = GetPrivateProfileIntA("Debug", "DumpFrames", dumpFrames, path);
     cameraScan           = GetBool(path, "Debug", "CameraScan", cameraScan);
     scanBase             = GetULong(path, "Debug", "ScanBase", 0);
     scanSize             = GetULong(path, "Debug", "ScanSize", 0);

@@ -124,6 +124,11 @@ private:
     D3DMATRIX ApplyHeadDelta(const D3DMATRIX& view);
     void CheckRecenterKey();
 
+    // Debug: dump stereo surface to BMP ([Debug] DumpFrames).
+    void DumpStereoSurface(IDirect3DDevice9* device, int index);
+    int  m_dumpedFrames = 0;
+    unsigned m_presentCount = 0;
+
     IDirect3DDevice9*  m_device     = nullptr;
     IDirect3DSurface9* m_stereoSurf = nullptr;   // 2W x H render target
     IDirect3DSurface9* m_stereoDS   = nullptr;   // 2W x H depth-stencil
@@ -150,6 +155,8 @@ private:
     bool       m_active    = false;  // stereo substitution currently in effect
     bool       m_inScene   = false;
     int        m_loggedViews = 0;    // M0 debugging: log first N view matrices
+    unsigned   m_viewCaptures = 0;   // total view captures (periodic logging)
+    int        m_loggedEyes  = 0;    // TEMP DIAG: log first 20 per-eye uploads
 
     // Menu-lock detection (M4): last time the captured view actually changed.
     unsigned long long m_lastViewChangeTick = 0;

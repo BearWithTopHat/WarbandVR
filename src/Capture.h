@@ -20,4 +20,9 @@ namespace Capture
     void OnSetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* m);
     void OnSetVSConstantF(UINT startRegister, const float* data, UINT count4);
     void EndFrame();
+
+    // CaptureMode=4: full event trace for one frame every 1200 frames.
+    // No-op otherwise; call sites are the device hooks.
+    void Trace(const char* fmt, ...);
+    bool TraceActive();
 }

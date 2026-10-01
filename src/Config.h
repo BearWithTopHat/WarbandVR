@@ -38,6 +38,7 @@ struct Config
     int   logLevel              = 2;
     int   logViewMatrices       = 25;
     int   captureMode           = 0;      // 0 off, 1 SetTransform, 2 VS consts
+    int   dumpFrames            = 0;      // dump stereo surface of first N presents to BMP
     bool  cameraScan            = false;
     float expectedPos[3]        = { 0, 0, 0 };
     bool  hasExpectedPos        = false;

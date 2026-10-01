@@ -2,6 +2,7 @@
 #include "Config.h"
 #include "Logger.h"
 #include "MathUtil.h"
+#include "Capture.h"
 #include "OpenXRBridge.h"
 #include "OneEuroFilter.h"
 
@@ -136,6 +137,12 @@ void StereoRenderer::OnBeginScene(IDirect3DDevice9* device)
     // "render target redirection".
     if (!m_gameRT && SUCCEEDED(device->GetRenderTarget(0, &m_gameRT)) && m_gameRT)
     {
+        if (Capture::TraceActive())
+        {
+            D3DSURFACE_DESC d{};
+            m_gameRT->GetDesc(&d);
+            Capture::Trace("OnBeginScene: substituting (gameRT=%p %ux%u)", m_gameRT, d.Width, d.Height);
+        }
         if (!CreateStereoDepth(device))
             LOG_WARN("StereoRenderer: no stereo depth buffer; SetRenderTarget may fail");
 
@@ -179,6 +186,9 @@ void StereoRenderer::OnPresent(IDirect3DDevice9* device)
     if (!m_active || !m_stereoSurf) return;
 
     EndShadowPass(); // in case the game left a pass open at frame end
+
+    if (Config::Get().dumpFrames > 0 && (m_presentCount++ % Config::Get().dumpFrames) == 0)
+        DumpStereoSurface(device, m_dumpedFrames++);
 
     if (Config::Get().outputMode == 1)
     {
@@ -228,8 +238,18 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
     RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
 
     // D3DTEXF_NONE keeps this legal for equal-format surfaces.
-    device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
-    device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
+    HRESULT hrL = device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
+    HRESULT hrR = device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
+    static bool s_loggedComposite = false;
+    if (!s_loggedComposite)
+    {
+        s_loggedComposite = true;
+        if (FAILED(hrL) || FAILED(hrR))
+            LOG_ERROR("StereoRenderer: composite StretchRect failed hrL=0x%08X hrR=0x%08X", hrL, hrR);
+        else
+            LOG_INFO("StereoRenderer: composite OK (%ldx%ld -> %ldx%ld x2)",
+                     halfW, h, bbHalfW, bbH);
+    }
 
     bb->Release();
 }
@@ -242,9 +262,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
 
     m_baseView = m;
     m_hasView  = true;
+    ++m_viewCaptures;
 
     int limit = Config::Get().logViewMatrices;
-    if (m_loggedViews < limit)
+    if (m_loggedViews < limit || (m_viewCaptures % 600) == 1)
     {
         char buf[640];
         Mat::Format(m, buf, sizeof(buf));
@@ -368,6 +389,13 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         // TODO(M0/M2): if VSMatrixIsViewProj, eyeView must be multiplied by the
         // captured projection matrix (asymmetric variant when enabled) here
         // instead of sent raw.
+        if (m_loggedEyes < 20) // TEMP DIAG: what do we actually upload per eye?
+        {
+            char buf[640];
+            Mat::Format(eyeView, buf, sizeof(buf));
+            LOG_INFO("EyeMat eye=%d base._41=%.3f,%s", eye, m_baseView._41, buf);
+            ++m_loggedEyes;
+        }
         device->SetVertexShaderConstantF(cfg.vsViewRegister,
                                          reinterpret_cast<const float*>(&eyeView), 4);
     }
@@ -426,6 +454,7 @@ HRESULT StereoRenderer::HandleSetRenderTarget(IDirect3DDevice9* device, DWORD id
     // Game returning to the surface we substituted at BeginScene.
     if (surf && surf == m_gameRT)
     {
+        Capture::Trace("SetRenderTarget: re-substituting stereo (surf=%p)", surf);
         EndShadowPass();
         if (m_stereoDS) device->SetDepthStencilSurface(m_stereoDS);
         return device->SetRenderTarget(0, m_stereoSurf);
@@ -436,6 +465,13 @@ HRESULT StereoRenderer::HandleSetRenderTarget(IDirect3DDevice9* device, DWORD id
         return S_OK;
 
     // Game moving to its own offscreen surface mid-frame.
+    if (Capture::TraceActive() && surf)
+    {
+        D3DSURFACE_DESC d{};
+        surf->GetDesc(&d);
+        Capture::Trace("SetRenderTarget: PASS-THROUGH (surf=%p %ux%u, m_gameRT=%p)",
+                       surf, d.Width, d.Height, m_gameRT);
+    }
     EndShadowPass();
     if (!surf || !Config::Get().offscreenPasses)
         return device->SetRenderTarget(idx, surf);
@@ -633,4 +669,94 @@ bool StereoRenderer::EnsureShadowDepth(IDirect3DDevice9* device, SurfaceShadow& 
         return false;
     }
     return true;
+}
+
+// --- Debug: dump the stereo surface to a BMP --------------------------------
+// [Debug] DumpFrames=N dumps the stereo target of the first N presents to
+// WarbandVR_frameNNN.bmp next to the dll. Lets us see exactly what each eye
+// half contains without any VR hardware.
+
+namespace { char g_dumpAnchor = 0; } // module-address anchor for GetModuleHandleEx
+
+void StereoRenderer::DumpStereoSurface(IDirect3DDevice9* device, int index)
+{
+    if (!m_stereoSurf) return;
+    D3DSURFACE_DESC desc{};
+    m_stereoSurf->GetDesc(&desc);
+
+    IDirect3DSurface9* sys = nullptr;
+    HRESULT hr = device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+                                                     D3DPOOL_SYSTEMMEM, &sys, nullptr);
+    if (FAILED(hr) || !sys)
+    {
+        LOG_WARN("DumpStereoSurface: CreateOffscreenPlainSurface failed hr=0x%08X", hr);
+        return;
+    }
+    hr = device->GetRenderTargetData(m_stereoSurf, sys);
+    if (FAILED(hr))
+    {
+        LOG_WARN("DumpStereoSurface: GetRenderTargetData failed hr=0x%08X", hr);
+        sys->Release();
+        return;
+    }
+
+    D3DLOCKED_RECT lr{};
+    if (FAILED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
+    {
+        sys->Release();
+        return;
+    }
+
+    char path[MAX_PATH];
+    char dllDir[MAX_PATH] = {};
+    HMODULE self = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCSTR>(&g_dumpAnchor), &self);
+    GetModuleFileNameA(self, dllDir, MAX_PATH);
+    char* slash = strrchr(dllDir, '\\');
+    if (slash) slash[1] = '\0';
+    snprintf(path, MAX_PATH, "%sWarbandVR_frame%03d.bmp", dllDir, index);
+
+    const int w = (int)desc.Width, h = (int)desc.Height;
+    const int rowBytes = w * 3;
+    const unsigned pixelBytes = rowBytes * h;
+    FILE* f = nullptr;
+    fopen_s(&f, path, "wb");
+    if (f)
+    {
+        #pragma pack(push, 1)
+        struct { char id[2]; unsigned size, r1, off; unsigned hdr, w, h; unsigned short planes, bpp;
+                 unsigned comp, img, xppm, yppm, colors, important; } hdr = {};
+        #pragma pack(pop)
+        hdr.id[0] = 'B'; hdr.id[1] = 'M';
+        hdr.off = 54;
+        hdr.size = 54 + pixelBytes;
+        hdr.hdr = 40; hdr.w = w; hdr.h = h;
+        hdr.planes = 1; hdr.bpp = 24;
+        hdr.img = pixelBytes;
+        fwrite(&hdr, 1, 54, f);
+        // BMP is bottom-up BGR; source is top-down BGRA (X8R8G8B8)
+        for (int y = h - 1; y >= 0; --y)
+        {
+            const unsigned char* srcRow = (const unsigned char*)lr.pBits + (size_t)y * lr.Pitch;
+            // Convert BGRA -> BGR in chunks to avoid a full-size stack buffer
+            unsigned char row[4096 * 3];
+            for (int x0 = 0; x0 < w; x0 += 4096)
+            {
+                int n = (w - x0 < 4096) ? (w - x0) : 4096;
+                for (int x = 0; x < n; ++x)
+                {
+                    row[x * 3 + 0] = srcRow[(x0 + x) * 4 + 0];
+                    row[x * 3 + 1] = srcRow[(x0 + x) * 4 + 1];
+                    row[x * 3 + 2] = srcRow[(x0 + x) * 4 + 2];
+                }
+                fwrite(row, 1, n * 3, f);
+            }
+        }
+        fclose(f);
+        LOG_INFO("DumpStereoSurface: wrote %s (%ux%u)", path, w, h);
+    }
+    sys->UnlockRect();
+    sys->Release();
 }

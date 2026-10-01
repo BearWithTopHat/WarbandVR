@@ -4,6 +4,7 @@
 #include "MathUtil.h"
 
 #include <cstring>
+#include <cstdarg>
 #include <cmath>
 
 namespace
@@ -215,4 +216,23 @@ void Capture::EndFrame()
     }
     if (n == 0)
         LOG_INFO("  (none)");
+}
+
+// --- CaptureMode=4: single-frame full event trace ---------------------------
+
+bool Capture::TraceActive()
+{
+    return Config::Get().captureMode == 4 && (g_frame % 1200) == 0;
+}
+
+void Capture::Trace(const char* fmt, ...)
+{
+    if (!TraceActive()) return;
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    msg[sizeof(msg) - 1] = '\0';
+    LOG_INFO("[TRACE f=%llu] %s", g_frame, msg);
 }
