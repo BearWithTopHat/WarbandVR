@@ -27,8 +27,10 @@ to first stereo image: **one focused evening**.
 2. Deploy:
    `powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -GameDir "D:\SteamLibrary\steamapps\common\MountBlade Warband"`
 3. Launch the game (stock ini: everything off). It must be **indistinguishable
-   from vanilla**. Confirm `WarbandVR_log.txt` exists next to the exe and
-   contains `15/15 vtable hooks installed` and the `Host exe:` line.
+   from vanilla**. Note the game first shows a **launcher dialog** — press
+   Play. (For automated runs, `tools\launch_game.ps1` clicks it for you.)
+   Confirm `WarbandVR_log.txt` exists next to the exe and
+   contains `18/18 vtable hooks installed` and the `Host exe:` line.
    - Copy the `Host exe:` line into `WarbandVR.ini → [Camera] GameBuild`
      (paste the size+mtime, e.g. `12345678-9ABCDEF012345678`).
 4. If the game won't boot: delete `d3d9.dll` from the game folder, hand the
@@ -73,7 +75,7 @@ needs the headset; M5 needs your sword arm.
 
 | Log line | Meaning |
 |---|---|
-| `CreateDevice ... hooks installed` | Proxy live, device hooked |
+| `CreateDevice ... hooks installed` | Proxy live, device hooked (18/18) |
 | `[CAPTURE f=...] SetTransform: VIEW xN` | M0 mode 1: N per-frame view writes |
 | `c17  writes=... viewLike=...` | M0 mode 2: register c17 looks matrix-like |
 | `[CAMERASCAN] converged to N candidates` | M0-C: camera position candidates |

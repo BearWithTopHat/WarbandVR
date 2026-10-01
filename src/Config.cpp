@@ -69,6 +69,7 @@ void Config::Load()
     asymmetricProjection = GetBool(path, "Stereo", "AsymmetricProjection", asymmetricProjection);
     sbsMonoUI            = GetBool(path, "Stereo", "SBSMonoUI", sbsMonoUI);
     uiMaxTriangles       = GetPrivateProfileIntA("Stereo", "UIMaxTriangles", uiMaxTriangles, path);
+    offscreenPasses      = GetBool(path, "Stereo", "OffscreenPasses", offscreenPasses);
 
     outputMode           = GetPrivateProfileIntA("Output", "OutputMode", outputMode, path);
 
@@ -99,9 +100,9 @@ void Config::Load()
 
     Log::SetLevel(logLevel);
     LOG_INFO("Config loaded from %s", path);
-    LOG_INFO("  EnableStereo=%d IPD=%.3f WorldScale=%.2f ViewSource=%d VSReg=%d AsymProj=%d OutputMode=%d",
+    LOG_INFO("  EnableStereo=%d IPD=%.3f WorldScale=%.2f ViewSource=%d VSReg=%d AsymProj=%d OutputMode=%d Offscreen=%d",
              enableStereo ? 1 : 0, ipd, worldScale, viewSource, vsViewRegister,
-             asymmetricProjection ? 1 : 0, outputMode);
+             asymmetricProjection ? 1 : 0, outputMode, offscreenPasses ? 1 : 0);
     LOG_INFO("  HeadTracking=%d CaptureMode=%d CameraScan=%d GameBuild='%s'",
              headTracking ? 1 : 0, captureMode, cameraScan ? 1 : 0, gameBuild);
 }

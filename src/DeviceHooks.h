@@ -5,8 +5,9 @@
 // view matrix, into a double-width render target.
 //
 // Hooked functions (IDirect3DDevice9 vtable indices in parentheses):
-//   Reset(16) Present(17) SetRenderTarget(37) BeginScene(41) EndScene(42)
-//   Clear(43) SetTransform(44) SetViewport(47) SetScissorRect(75)
+//   Reset(16) Present(17) SetRenderTarget(37) SetDepthStencilSurface(39)
+//   BeginScene(41) EndScene(42) Clear(43) SetTransform(44) SetViewport(47)
+//   SetRenderState(57) SetTexture(65) SetScissorRect(75)
 //   DrawPrimitive(81) DrawIndexedPrimitive(82) DrawPrimitiveUP(83)
 //   DrawIndexedPrimitiveUP(84) SetVertexShaderConstantF(94) DrawRectPatch(115)
 //

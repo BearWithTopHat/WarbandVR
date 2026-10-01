@@ -36,10 +36,12 @@ library outside Program Files — recommended; saves a lot of friction.)
 
 ## The test ritual (run after EVERY change)
 
-1. **Stock boot.** `EnableStereo=0`. Launch, reach the main menu, load a
-   save, walk 30 seconds. Rendering must be indistinguishable from vanilla.
+1. **Stock boot.** `EnableStereo=0`. Launch, press Play in the launcher
+   dialog (or use `tools\launch_game.ps1` for scripted runs), reach the main
+   menu, load a save, walk 30 seconds. Rendering must be indistinguishable
+   from vanilla.
    `WarbandVR_log.txt` must show: proxy init → `CreateDevice` →
-   `15/15 vtable hooks installed` → no `ERR` lines.
+   `18/18 vtable hooks installed` → no `ERR` lines.
 2. **Feature on.** Flip only the flag under test. Verify the feature.
 3. **Stability probes:** alt-tab out and back; toggle fullscreen/windowed;
    trigger a battle load screen. (These all exercise `Reset` — historically

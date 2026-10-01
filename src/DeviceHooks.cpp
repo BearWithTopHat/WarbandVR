@@ -22,11 +22,14 @@ namespace
     typedef HRESULT (__stdcall *Reset_t)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
     typedef HRESULT (__stdcall *Present_t)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
     typedef HRESULT (__stdcall *SetRenderTarget_t)(IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
+    typedef HRESULT (__stdcall *SetDepthStencilSurface_t)(IDirect3DDevice9*, IDirect3DSurface9*);
     typedef HRESULT (__stdcall *BeginScene_t)(IDirect3DDevice9*);
     typedef HRESULT (__stdcall *EndScene_t)(IDirect3DDevice9*);
     typedef HRESULT (__stdcall *Clear_t)(IDirect3DDevice9*, DWORD, const D3DRECT*, DWORD, D3DCOLOR, float, DWORD);
     typedef HRESULT (__stdcall *SetTransform_t)(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
     typedef HRESULT (__stdcall *SetViewport_t)(IDirect3DDevice9*, const D3DVIEWPORT9*);
+    typedef HRESULT (__stdcall *SetRenderState_t)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+    typedef HRESULT (__stdcall *SetTexture_t)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
     typedef HRESULT (__stdcall *SetScissorRect_t)(IDirect3DDevice9*, const RECT*);
     typedef HRESULT (__stdcall *DrawPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
     typedef HRESULT (__stdcall *DrawIndexedPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
@@ -38,11 +41,14 @@ namespace
     DECL_ORIG(o_Reset, Reset_t);
     DECL_ORIG(o_Present, Present_t);
     DECL_ORIG(o_SetRenderTarget, SetRenderTarget_t);
+    DECL_ORIG(o_SetDepthStencilSurface, SetDepthStencilSurface_t);
     DECL_ORIG(o_BeginScene, BeginScene_t);
     DECL_ORIG(o_EndScene, EndScene_t);
     DECL_ORIG(o_Clear, Clear_t);
     DECL_ORIG(o_SetTransform, SetTransform_t);
     DECL_ORIG(o_SetViewport, SetViewport_t);
+    DECL_ORIG(o_SetRenderState, SetRenderState_t);
+    DECL_ORIG(o_SetTexture, SetTexture_t);
     DECL_ORIG(o_SetScissorRect, SetScissorRect_t);
     DECL_ORIG(o_DrawPrimitive, DrawPrimitive_t);
     DECL_ORIG(o_DrawIndexedPrimitive, DrawIndexedPrimitive_t);
@@ -65,20 +71,23 @@ namespace
         LARGE_INTEGER t0, t1;
         QueryPerformanceCounter(&t0);
 
-        HRESULT hr = S_OK;
         DeviceHooks::Get().m_internal = true;
         StereoRenderer::Get().ApplyEye(dev, 0);
         DeviceHooks::Get().m_internal = false;
-        hr = draw();
+        HRESULT hrL = draw();
 
         DeviceHooks::Get().m_internal = true;
         StereoRenderer::Get().ApplyEye(dev, 1);
         DeviceHooks::Get().m_internal = false;
-        hr = draw();
+        HRESULT hrR = draw();
 
         DeviceHooks::Get().m_internal = true;
         StereoRenderer::Get().RestoreGameState(dev);
         DeviceHooks::Get().m_internal = false;
+
+        // Report the first failure; previously a failing left-eye draw was
+        // silently masked by the right-eye result.
+        HRESULT hr = FAILED(hrL) ? hrL : hrR;
 
         QueryPerformanceCounter(&t1);
         LARGE_INTEGER freq;
@@ -121,9 +130,30 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d,
 
 HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DSurface9* surf)
 {
-    // Pass-through for now. M2 work: track offscreen passes so post-processing
-    // and shadow maps don't break stereo (docs/01_Design.md).
-    return o_SetRenderTarget(dev, idx, surf);
+    if (DeviceHooks::Get().m_internal || !StereoOn())
+        return o_SetRenderTarget(dev, idx, surf);
+
+    // Routed through StereoRenderer: re-applies the stereo substitution when
+    // the game returns to its main target, and (M2, OffscreenPasses=1) gives
+    // the game's own mid-frame targets per-eye shadow copies.
+    DeviceHooks::Get().m_internal = true;
+    HRESULT hr = StereoRenderer::Get().HandleSetRenderTarget(dev, idx, surf);
+    DeviceHooks::Get().m_internal = false;
+    return hr;
+}
+
+HRESULT __stdcall hkSetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurface9* ds)
+{
+    if (DeviceHooks::Get().m_internal || !StereoOn())
+        return o_SetDepthStencilSurface(dev, ds);
+
+    // The game re-pointing the depth buffer mid-frame would pair its small
+    // depth surface with our double-width target (illegal in D3D9); the
+    // renderer substitutes the matching stereo/shadow depth instead.
+    DeviceHooks::Get().m_internal = true;
+    HRESULT hr = StereoRenderer::Get().HandleSetDepthStencil(dev, ds);
+    DeviceHooks::Get().m_internal = false;
+    return hr;
 }
 
 HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
@@ -155,6 +185,16 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
     if (DeviceHooks::Get().m_internal || !StereoOn())
         return o_Clear(dev, count, rects, flags, color, z, stencil);
 
+    // While a shadow pass is bound the target is per-eye (game-sized), so
+    // Clear must run once per eye with unshifted rects.
+    if (StereoRenderer::Get().ShadowActive())
+    {
+        DeviceHooks::Get().m_internal = true;
+        HRESULT hr = StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
+        DeviceHooks::Get().m_internal = false;
+        return hr;
+    }
+
     if (rects == nullptr)
     {
         // Whole-target clear covers both eyes in one call.
@@ -164,7 +204,7 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
     // Region clears are in surface coordinates, so they must be duplicated
     // per eye with each half's horizontal offset (unlike viewports, Clear
     // rects do NOT follow the viewport).
-    const LONG halfW = static_cast<LONG>(StereoRenderer::Get().StereoHalfWidth());
+    const LONG halfW = static_cast<LONG>(StereoRenderer::Get().ActiveEyeOffset());
     HRESULT hr = S_OK;
     for (int eye = 0; eye < 2; ++eye)
     {
@@ -210,8 +250,27 @@ HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
 
 HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9* dev, const RECT* rect)
 {
-    // TODO(M2): per-eye offset when scissor test is enabled.
+    // Track the game's intended rect; ApplyEye re-applies it per eye with a
+    // horizontal offset when the scissor test is enabled.
+    if (!DeviceHooks::Get().m_internal && rect)
+        StereoRenderer::Get().SetGameScissorRect(*rect);
     return o_SetScissorRect(dev, rect);
+}
+
+HRESULT __stdcall hkSetRenderState(IDirect3DDevice9* dev, D3DRENDERSTATETYPE state, DWORD value)
+{
+    if (!DeviceHooks::Get().m_internal && state == D3DRS_SCISSORTESTENABLE)
+        StereoRenderer::Get().SetScissorTestEnabled(value != 0);
+    return o_SetRenderState(dev, state, value);
+}
+
+HRESULT __stdcall hkSetTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* tex)
+{
+    // Learns which sampler stages bind a shadowed surface so ApplyEye can
+    // swap in the per-eye copy (cheap no-op when no shadows exist).
+    if (!DeviceHooks::Get().m_internal && StereoOn())
+        StereoRenderer::Get().OnGameSetTexture(stage, tex);
+    return o_SetTexture(dev, stage, tex);
 }
 
 HRESULT __stdcall hkDrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT start, UINT count)
@@ -311,11 +370,14 @@ void DeviceHooks::InstallHooks(IDirect3DDevice9* device)
         { 16,  &hkReset,                   reinterpret_cast<void**>(&o_Reset),                   "Reset" },
         { 17,  &hkPresent,                 reinterpret_cast<void**>(&o_Present),                 "Present" },
         { 37,  &hkSetRenderTarget,         reinterpret_cast<void**>(&o_SetRenderTarget),         "SetRenderTarget" },
+        { 39,  &hkSetDepthStencilSurface,  reinterpret_cast<void**>(&o_SetDepthStencilSurface),  "SetDepthStencilSurface" },
         { 41,  &hkBeginScene,              reinterpret_cast<void**>(&o_BeginScene),              "BeginScene" },
         { 42,  &hkEndScene,                reinterpret_cast<void**>(&o_EndScene),                "EndScene" },
         { 43,  &hkClear,                   reinterpret_cast<void**>(&o_Clear),                   "Clear" },
         { 44,  &hkSetTransform,            reinterpret_cast<void**>(&o_SetTransform),            "SetTransform" },
         { 47,  &hkSetViewport,             reinterpret_cast<void**>(&o_SetViewport),             "SetViewport" },
+        { 57,  &hkSetRenderState,          reinterpret_cast<void**>(&o_SetRenderState),          "SetRenderState" },
+        { 65,  &hkSetTexture,              reinterpret_cast<void**>(&o_SetTexture),              "SetTexture" },
         { 75,  &hkSetScissorRect,          reinterpret_cast<void**>(&o_SetScissorRect),          "SetScissorRect" },
         { 81,  &hkDrawPrimitive,           reinterpret_cast<void**>(&o_DrawPrimitive),           "DrawPrimitive" },
         { 82,  &hkDrawIndexedPrimitive,    reinterpret_cast<void**>(&o_DrawIndexedPrimitive),    "DrawIndexedPrimitive" },

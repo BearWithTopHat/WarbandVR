@@ -16,6 +16,9 @@ struct Config
     bool  asymmetricProjection  = false;  // off-center frustum (M2 correctness)
     bool  sbsMonoUI             = true;   // draw tiny primitives once (UI)
     int   uiMaxTriangles        = 64;     // "tiny" threshold
+    bool  offscreenPasses       = false;  // M2: per-eye shadows for the game's
+                                          // own render passes (UNTESTED - keep
+                                          // off until validated on-game)
 
     // [Output]
     int   outputMode            = 0;      // 0 = SBS monitor, 1 = OpenXR

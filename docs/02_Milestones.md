@@ -37,7 +37,7 @@ three questions:
 Deliverable: with `EnableStereo=1, OutputMode=0`, the game renders
 side-by-side stereo to the normal monitor.
 
-- [ ] Proxy loads, game boots stock with `EnableStereo=0` (invariant)
+- [x] Proxy loads, game boots stock with `EnableStereo=0` (invariant) — verified on the real game: CreateDevice OK, 18/18 hooks, clean log
 - [ ] SBS image in first-person on foot: two views, correct parallax
 - [ ] SBS image in a field battle with 100+ agents
 - [ ] IPD/WorldScale feel right (cross-eye check or record + review)
@@ -48,8 +48,8 @@ side-by-side stereo to the normal monitor.
 and perf instrumentation are already implemented; remaining work is offscreen
 passes, scissor, and verification
 
-- [ ] Offscreen render passes (shadow maps, reflections) handled per eye
-- [ ] Scissor rects offset per eye (TODO in `hkSetScissorRect`)
+- [x] ~~Offscreen render passes (shadow maps, reflections) handled per eye~~ implemented behind `OffscreenPasses=1` (per-eye shadow targets + sampler swap; needs on-game verification)
+- [x] ~~Scissor rects offset per eye~~ implemented (`hkSetRenderState` + `hkSetScissorRect`; needs on-game verification)
 - [x] ~~Asymmetric (off-center) projection~~ implemented (`AsymmetricProjection=1`; needs on-game verification)
 - [x] ~~2D UI passes detected and drawn *mono*~~ implemented (`SBSMonoUI` heuristic; tune `UIMaxTriangles` on-game)
 - [ ] Overhead verified: `[PERF]` log shows <4 ms/frame added at 1080p

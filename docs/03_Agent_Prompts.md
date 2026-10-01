@@ -103,6 +103,16 @@ clean at LogLevel=2.
 ```
 Task: Handle the engine's own render passes correctly in stereo.
 
+> Update 2026-10-01 (third iteration): the code halves of this task are now
+> IMPLEMENTED: per-eye scissor (hkSetRenderState index 57 - the brief below
+> said 174; that is D3DRS_SCISSORTESTENABLE's value, not a vtable index -
+> plus hkSetScissorRect tracking), depth-stencil substitution (new hook
+> SetDepthStencilSurface index 39), and offscreen shadow passes (per-eye
+> shadow targets + SetTexture sampler swap, index 65) behind
+> [Stereo] OffscreenPasses=1 (default 0). What remains is on-game
+> verification and triage, plus making AsymmetricProjection the default once
+> A/B-tested.
+
 Already implemented (verify on-game, fix if wrong): asymmetric projection
 (AsymmetricProjection=1), per-eye region Clear offsets, UI mono heuristic,
 game viewport tracking.

@@ -63,6 +63,57 @@ now so the M3 zero-copy shared-surface path is a local change in
 `IDirect3DDevice9Ex`'s vtable shares the base layout, so the 15 existing
 hooks apply unchanged.
 
+### 2026-10-01 (iteration 3) — Scaffold bit-rot fixed; first real-game boot
+The scaffold had never actually compiled: (a) `__declspec(dllexport)` on
+`dllmain.cpp`'s export definitions clashes with d3d9.h's own declarations
+(C2375 on MSVC v143 + SDK 10.0.26100) — removed; exports come from
+`WarbandVR.def` alone. (b) The proxies were written against a misremembered
+`IDirect3D9`: real interface has `GetAdapterModeCount` (missing) and
+`EnumAdapterModes` returns `HRESULT` (was `UINT`) — fixed, which also fixed
+the abstract-class errors. (c) `IID_IDirect3D9(Ex)` live in `dxguid.lib`,
+not `d3d9.lib` — both now linked. First real-game smoke test passed:
+launcher bypassed (below), CreateDevice OK, 18/18 hooks, clean log at 4K.
+
+### 2026-10-01 (iteration 3) — Depth-stencil substitution added (M1 blocker)
+D3D9 requires the bound depth-stencil to be at least as large as the render
+target, so pointing RT0 at the double-width stereo target while the game's
+backbuffer-sized depth stayed bound would fail `SetRenderTarget` outright.
+`StereoRenderer` now creates a matching 2W×H depth buffer and substitutes it
+alongside the RT at `BeginScene` (restored at `Present`). A
+`SetDepthStencilSurface` hook (index 39) keeps the pairing legal when the
+game re-points depth mid-frame. Limitation: stereo RT/DS are
+`D3DMULTISAMPLE_NONE`; if Warband runs with MSAA enabled and substitution
+fails on-game, revisit (either create MSAA-matching surfaces or force the
+game's AA off).
+
+### 2026-10-01 (iteration 3) — Scissor hook index is 57, not 174
+The M2-1 task brief said "SetRenderState hook, index 174". 174 is the value
+of `D3DRS_SCISSORTESTENABLE`; the vtable index of `SetRenderState` is 57.
+Implemented: `hkSetRenderState` tracks scissor-test enable,
+`hkSetScissorRect` stores the game's rect, `ApplyEye` re-applies it per eye
+with the eye offset.
+
+### 2026-10-01 (iteration 3) — Offscreen passes: per-eye targets, not copy-back
+The M2-1 design said "double-width shadow + copy the left half back to the
+game surface". That is impossible mid-frame: every copy mechanism
+(`StretchRect`, `UpdateSurface`, `UpdateTexture`, `GetRenderTargetData`) is
+illegal inside `BeginScene`/`EndScene`, and deferring the copy to frame end
+would leave the game's texture stale for same-frame sampling — worse than
+today. Implemented instead: per-eye game-sized render-target textures
+substituted in `ApplyEye`, plus a `SetTexture` hook (index 65) that learns
+surface→texture bindings so samplers get the matching eye copy. The game's
+own surface/texture is never touched. Behind `OffscreenPasses=1` (default
+0) until verified on-game.
+
+### 2026-10-01 (iteration 3) — Warband boots via a launcher; tests must click Play
+`mb_warband.exe` opens a launcher dialog (Win32 class `#32770`, title
+"Mount&Blade Warband") which itself calls `Direct3DCreate9` for adapter
+enumeration — a log that stops after `Direct3DCreate9` with no
+`CreateDevice` is the launcher, not a proxy fault. The game only creates
+its device after Play is pressed. `tools/launch_game.ps1` clicks the Play
+button (dialog control ID 1029, same technique as the WarbandX launcher) so
+automated smoke tests reach the game.
+
 ## Session log
 
 - **2026-10-01** — Scaffold created: proxy, IDirect3D9 wrapper, 15 device
@@ -75,3 +126,14 @@ hooks apply unchanged.
   recenter key), exe version tagging. New doc 00_Runbook.md (human's evening
   plan). Prompts 03 rewritten. Next action: human runs Phase 1–3 of the
   runbook; first agent coding task is M1-1 bring-up.
+- **2026-10-01 (iteration 3)** — Fixed scaffold bit-rot (dllexport linkage,
+  proxy interface, dxguid) so the project builds on stock VS2022. Fixed a
+  latent M1 blocker: double-width stereo depth-stencil substitution
+  (+ `SetDepthStencilSurface` hook). M2-1 code landed: per-eye scissor
+  (new hooks `SetRenderState` 57, `SetScissorRect` tracking) and offscreen
+  shadow passes (new hooks `SetRenderTarget` routing, `SetTexture` 65;
+  behind `OffscreenPasses=0`). 15 → 18 hooks. New `tools/launch_game.ps1`
+  clicks through the Warband launcher for automated runs. First real-game
+  smoke test: stock boot with proxy, CreateDevice OK, 18/18 hooks, clean
+  log — invariant 1 verified on the real game. Next action: human M0
+  capture protocol (runbook Phase 2), then M1 stereo bring-up.
