@@ -1,0 +1,38 @@
+#pragma once
+
+// D3D9Proxy: a delegating wrapper around the real IDirect3D9.
+// Its only real job is to intercept CreateDevice so we can hook the
+// resulting IDirect3DDevice9. Everything else passes straight through.
+
+#include <d3d9.h>
+#include <atomic>
+
+class D3D9Proxy : public IDirect3D9
+{
+public:
+    explicit D3D9Proxy(IDirect3D9* real);
+
+    // IUnknown
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppvObj) override;
+    ULONG   __stdcall AddRef() override;
+    ULONG   __stdcall Release() override;
+
+    // IDirect3D9
+    HRESULT __stdcall RegisterSoftwareDevice(void* pInitializeFunction) override;
+    UINT    __stdcall GetAdapterCount() override;
+    HRESULT __stdcall GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9* pIdentifier) override;
+    UINT    __stdcall EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) override;
+    HRESULT __stdcall GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) override;
+    HRESULT __stdcall CheckDeviceType(UINT Adapter, D3DDEVTYPE DevType, D3DFORMAT AdapterFormat, D3DFORMAT BackBufferFormat, BOOL bWindowed) override;
+    HRESULT __stdcall CheckDeviceFormat(UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, DWORD Usage, D3DRESOURCETYPE RType, D3DFORMAT CheckFormat) override;
+    HRESULT __stdcall CheckDeviceMultiSampleType(UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT SurfaceFormat, BOOL Windowed, D3DMULTISAMPLE_TYPE MultiSampleType, DWORD* pQualityLevels) override;
+    HRESULT __stdcall CheckDepthStencilMatch(UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, D3DFORMAT RenderTargetFormat, D3DFORMAT DepthStencilFormat) override;
+    HRESULT __stdcall CheckDeviceFormatConversion(UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT SourceFormat, D3DFORMAT TargetFormat) override;
+    HRESULT __stdcall GetDeviceCaps(UINT Adapter, D3DDEVTYPE DeviceType, D3DCAPS9* pCaps) override;
+    HMONITOR __stdcall GetAdapterMonitor(UINT Adapter) override;
+    HRESULT __stdcall CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface) override;
+
+private:
+    IDirect3D9* m_real;
+    std::atomic<ULONG> m_refCount;
+};

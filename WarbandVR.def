@@ -1,0 +1,22 @@
+; WarbandVR d3d9.dll proxy - module definition file
+; We must export every d3d9.dll symbol that mb_warband.exe (or its
+; dependencies, e.g. d3dx9_xx.dll) might import. The ones we care about
+; are implemented in dllmain.cpp; the rest are thin forwarders that are
+; resolved at runtime against the real system d3d9.dll.
+;
+; If the game ever fails to load with "missing export", add the missing
+; name here and a matching forward stub in dllmain.cpp.
+
+EXPORTS
+    Direct3DCreate9
+    Direct3DCreate9Ex
+    Direct3DShaderValidatorCreate9
+    D3DPERF_BeginEvent
+    D3DPERF_EndEvent
+    D3DPERF_SetMarker
+    D3DPERF_SetRegion
+    D3DPERF_QueryRepeatFrame
+    D3DPERF_SetOptions
+    D3DPERF_GetStatus
+    DebugSetMute
+    DebugSetLevel
