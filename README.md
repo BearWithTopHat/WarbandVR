@@ -16,29 +16,30 @@ to the Steam Frame works exactly like the flat game already does for you.
 | d3d9.dll proxy + export forwarding | Implemented |
 | IDirect3D9 **and IDirect3D9Ex** wrappers, device capture | Implemented |
 | DeviceProxy: full device wrapper (134 methods), 18 intercepted | Implemented — **immune to Steam overlay vtable swaps** |
-| Per-eye draw duplication into a double-width target | Implemented — **verified running on the real game** |
-| Stereo depth-stencil substitution (D3D9 legality for the 2W target) | Implemented — verified on the real game |
-| Side-by-side monitor output | Implemented |
-| M0 capture tooling (view-source detector, VS register ranker) | **Implemented — human runs it** (docs/00, docs/04) |
-| M0 memory scanner (camera-struct candidate finder) | **Implemented — human runs it** |
-| UI mono-draw heuristic (kills double-vision HUD) | Implemented |
-| Game viewport tracking, per-eye region clears | Implemented |
-| Per-eye scissor rects (SetRenderState + SetScissorRect hooks) | Implemented (needs on-game verification) |
-| Offscreen render-pass shadowing (per-eye shadow targets + sampler swap) | Implemented behind `OffscreenPasses=1` (untested on game) |
+| **Per-eye game-sized render targets + depth (draw rerouting)** | Implemented — **the architecture that finally worked** |
+| Side-by-side monitor output (battle + menu, correct occlusion) | **Verified on the real game** |
+| Flat-UI passes (ortho-projection detection) | Implemented — text aligns with boxes |
+| M0 capture tooling (VS register shadowing, mode 2/3 ranking + dumps) | Implemented — register map known (c0 = per-draw transform stream) |
+| M0 memory scanner (camera-struct candidate finder) | Implemented — unused so far |
+| Per-eye scissor, per-eye clears, viewport tracking | Implemented (superseded by per-eye model) |
+| Offscreen render-pass shadowing (`OffscreenPasses`) | Implemented, dormant (per-eye model covers it) |
 | Asymmetric (off-center) projection | Implemented (off by default) |
 | Head-tracking pipeline (pose composition, OneEuro smoothing, menu lock, recenter key) | Implemented — waits on M3 pose source |
-| Perf instrumentation (duplication cost logging) | Implemented |
-| View matrix source (SetTransform vs shader constant) | Likely **shader-driven** (zero `SetTransform` calls in menu/loading) — M0 run confirms register |
+| Perf instrumentation (duplication cost logging) | Implemented — ≤0.2 ms/frame measured |
+| View matrix source (SetTransform vs shader constant) | **Shader-driven confirmed** (`ViewSource=1`, register c0) |
 | OpenXR output | Stub + implementation guide (M3) |
 | Motion controls | M5 (design written, classifier to build) |
 
-**Verified on the real game:** stock boot clean (`EnableStereo=0`), stereo
-boot clean (`EnableStereo=1` — stereo target/depth substitution active,
-survives `Reset`, no errors). Big fix this round: the Steam overlay swaps
-the device object's vtable pointer, which defeated the original vtable
-hooks; interception now happens in a full `DeviceProxy` wrapper. Note: the
-game boots into a launcher dialog; `tools/launch_game.ps1` clicks through
-it for automated test runs.
+**M1 achieved on the real game:** stock boot clean (`EnableStereo=0`), and
+`EnableStereo=1` renders battles and menus side-by-side in both halves
+with correct per-eye occlusion. The road there ran through two
+architecture changes: vtable hooks → full `DeviceProxy` wrapper (the
+Steam overlay swaps device vtable pointers), and one double-width stereo
+target → per-eye game-sized targets (the game's mono Z-prepass plus
+ZFUNC_EQUAL color pass made a shared double-width depth buffer
+unworkable). Full story in `docs/06`. Note: the game boots into a
+launcher dialog; `tools/launch_game.ps1` clicks through it for automated
+runs.
 
 ## Repo layout
 

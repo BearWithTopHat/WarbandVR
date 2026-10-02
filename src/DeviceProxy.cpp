@@ -471,6 +471,7 @@ HRESULT __stdcall DeviceProxy::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* 
 
 HRESULT __stdcall DeviceProxy::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl)
 {
+    DeviceHooks::Get().TrackVertexDeclaration(pDecl);
     return m_real->SetVertexDeclaration(pDecl);
 }
 
@@ -481,6 +482,7 @@ HRESULT __stdcall DeviceProxy::GetVertexDeclaration(IDirect3DVertexDeclaration9*
 
 HRESULT __stdcall DeviceProxy::SetFVF(DWORD FVF)
 {
+    DeviceHooks::Get().TrackFVF(FVF);
     return m_real->SetFVF(FVF);
 }
 

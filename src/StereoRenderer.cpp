@@ -7,12 +7,17 @@
 #include "OneEuroFilter.h"
 
 #include <cstring>
+#include <algorithm>
 
 StereoRenderer& StereoRenderer::Get()
 {
     static StereoRenderer s;
     return s;
 }
+
+// ---------------------------------------------------------------------------
+// Device lifecycle
+// ---------------------------------------------------------------------------
 
 void StereoRenderer::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
 {
@@ -62,106 +67,119 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
         return;
     }
 
-    D3DFORMAT fmt = (m_pp.BackBufferFormat != D3DFMT_UNKNOWN) ? m_pp.BackBufferFormat : D3DFMT_X8R8G8B8;
-    HRESULT hr = device->CreateRenderTarget(w * 2, h, fmt, D3DMULTISAMPLE_NONE, 0,
-                                            FALSE, &m_stereoSurf, nullptr);
-    if (FAILED(hr))
+    // Depth format from the game's own depth-stencil, so depth behavior
+    // (Z-prepass, stencil) matches stock per eye.
+    D3DFORMAT dsFmt = D3DFMT_D24S8;
+    IDirect3DSurface9* gameDS = nullptr;
+    if (SUCCEEDED(device->GetDepthStencilSurface(&gameDS)) && gameDS)
     {
-        LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) failed hr=0x%08X", w * 2, h, hr);
-        m_stereoSurf = nullptr;
+        D3DSURFACE_DESC dsDesc{};
+        gameDS->GetDesc(&dsDesc);
+        dsFmt = dsDesc.Format;
+        gameDS->Release();
+    }
+    m_dsFormat = dsFmt;
+
+    D3DFORMAT fmt = (m_pp.BackBufferFormat != D3DFMT_UNKNOWN) ? m_pp.BackBufferFormat : D3DFMT_X8R8G8B8;
+    bool ok = true;
+    for (int eye = 0; eye < 2 && ok; ++eye)
+    {
+        HRESULT hr = device->CreateRenderTarget(w, h, fmt, D3DMULTISAMPLE_NONE, 0,
+                                                FALSE, &m_eyeSurf[eye], nullptr);
+        if (FAILED(hr))
+        {
+            LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) eye=%d failed hr=0x%08X", w, h, eye, hr);
+            m_eyeSurf[eye] = nullptr;
+            ok = false;
+            break;
+        }
+        hr = device->CreateDepthStencilSurface(w, h, dsFmt, D3DMULTISAMPLE_NONE, 0,
+                                               TRUE, &m_eyeDS[eye], nullptr);
+        if (FAILED(hr))
+        {
+            LOG_ERROR("StereoRenderer: CreateDepthStencilSurface(%ux%u fmt=%d) eye=%d failed hr=0x%08X",
+                      w, h, dsFmt, eye, hr);
+            m_eyeDS[eye] = nullptr;
+            ok = false;
+            break;
+        }
+    }
+    if (!ok)
+    {
+        ReleaseResources();
         return;
     }
-    LOG_INFO("StereoRenderer: stereo target %ux%u created", w * 2, h);
+    m_eyeW = w;
+    m_eyeH = h;
+    m_needClear = true;
+    LOG_INFO("StereoRenderer: per-eye targets %ux%u (depth fmt=%d) created", w, h, dsFmt);
 }
 
 void StereoRenderer::ReleaseResources()
 {
     ReleaseAllShadows();
-    if (m_gameDS)     { m_gameDS->Release();     m_gameDS = nullptr; }
-    if (m_stereoDS)   { m_stereoDS->Release();   m_stereoDS = nullptr; }
-    if (m_gameRT)     { m_gameRT->Release();     m_gameRT = nullptr; }
-    if (m_stereoSurf) { m_stereoSurf->Release(); m_stereoSurf = nullptr; }
-}
-
-// Creates the double-width depth-stencil paired with the stereo target.
-// D3D9 rejects SetRenderTarget when the bound depth-stencil is smaller than
-// the render target, so without this the substitution fails outright.
-bool StereoRenderer::CreateStereoDepth(IDirect3DDevice9* device)
-{
-    if (m_stereoDS || !m_stereoSurf) return m_stereoDS != nullptr;
-
-    IDirect3DSurface9* gameDS = nullptr;
-    if (FAILED(device->GetDepthStencilSurface(&gameDS)) || !gameDS)
-        return false; // game renders depthless; no substitution needed
-
-    D3DSURFACE_DESC dsDesc{};
-    gameDS->GetDesc(&dsDesc);
-    gameDS->Release();
-
-    D3DSURFACE_DESC rtDesc{};
-    m_stereoSurf->GetDesc(&rtDesc);
-
-    HRESULT hr = device->CreateDepthStencilSurface(rtDesc.Width, rtDesc.Height, dsDesc.Format,
-                                                   D3DMULTISAMPLE_NONE, 0, TRUE,
-                                                   &m_stereoDS, nullptr);
-    if (FAILED(hr))
+    for (int eye = 0; eye < 2; ++eye)
     {
-        LOG_ERROR("StereoRenderer: CreateDepthStencilSurface(%ux%u fmt=%d) failed hr=0x%08X",
-                  rtDesc.Width, rtDesc.Height, dsDesc.Format, hr);
-        m_stereoDS = nullptr;
-        return false;
+        if (m_eyeDS[eye])   { m_eyeDS[eye]->Release();   m_eyeDS[eye] = nullptr; }
+        if (m_eyeSurf[eye]) { m_eyeSurf[eye]->Release(); m_eyeSurf[eye] = nullptr; }
     }
-    LOG_INFO("StereoRenderer: stereo depth %ux%u fmt=%d created",
-             rtDesc.Width, rtDesc.Height, dsDesc.Format);
-    return true;
+    m_eyeW = m_eyeH = 0;
+    m_curRT = nullptr;
+    m_curRTIsMain = false;
+    m_diverted.clear();
+    m_divertedBinds.clear();
+    m_needClear = true;
 }
 
-int StereoRenderer::StereoHalfWidth() const
-{
-    if (!m_stereoSurf) return 0;
-    D3DSURFACE_DESC desc{};
-    m_stereoSurf->GetDesc(&desc);
-    return static_cast<int>(desc.Width / 2);
-}
+// ---------------------------------------------------------------------------
+// Frame lifecycle
+// ---------------------------------------------------------------------------
 
 void StereoRenderer::OnBeginScene(IDirect3DDevice9* device)
 {
     m_inScene = true;
     CheckRecenterKey();
     if (!Config::Get().enableStereo) return;
-    if (!m_stereoSurf) { CreateResources(device); if (!m_stereoSurf) return; }
+    if (!m_eyeSurf[0]) { CreateResources(device); if (!m_eyeSurf[0]) return; }
+    m_active = true;
 
-    // Remember the game's current RT0 and substitute our stereo target.
-    // NOTE: if the game later re-points RT0 itself (post-processing passes),
-    // that is routed through HandleSetRenderTarget - see docs/01_Design.md
-    // "render target redirection".
-    if (!m_gameRT && SUCCEEDED(device->GetRenderTarget(0, &m_gameRT)) && m_gameRT)
+    // Track RT0 even for scenes where the game never calls SetRenderTarget
+    // (e.g. the menu, which renders to the default backbuffer) - an unseen
+    // bind must not silently read as "offscreen" and force mono.
+    IDirect3DSurface9* rt0 = nullptr;
+    if (SUCCEEDED(device->GetRenderTarget(0, &rt0)) && rt0)
     {
-        if (Capture::TraceActive())
-        {
-            D3DSURFACE_DESC d{};
-            m_gameRT->GetDesc(&d);
-            Capture::Trace("OnBeginScene: substituting (gameRT=%p %ux%u)", m_gameRT, d.Width, d.Height);
-        }
-        if (!CreateStereoDepth(device))
-            LOG_WARN("StereoRenderer: no stereo depth buffer; SetRenderTarget may fail");
-
-        // Remember the game's depth-stencil so OnPresent can restore it.
-        IDirect3DSurface9* curDS = nullptr;
-        if (SUCCEEDED(device->GetDepthStencilSurface(&curDS)) && curDS)
-            m_gameDS = curDS; // keeps the Get ref
-
-        if (SUCCEEDED(device->SetRenderTarget(0, m_stereoSurf)))
-        {
-            if (m_stereoDS)
-                device->SetDepthStencilSurface(m_stereoDS);
-            m_active = true;
-        }
-        else
-        {
-            LOG_WARN("StereoRenderer: SetRenderTarget substitution failed");
-        }
+        SetCurrentRT(rt0);
+        rt0->Release();
     }
+
+    if (m_needClear)
+    {
+        m_needClear = false;
+        ClearEyeTargets(device);
+    }
+}
+
+void StereoRenderer::ClearEyeTargets(IDirect3DDevice9* device)
+{
+    // Called with m_internal held (from hkBeginScene). Clears each eye
+    // target once per render frame; the game's own clears are untouched.
+    IDirect3DSurface9* savedRT = nullptr;
+    IDirect3DSurface9* savedDS = nullptr;
+    device->GetRenderTarget(0, &savedRT);
+    device->GetDepthStencilSurface(&savedDS);
+
+    for (int eye = 0; eye < 2; ++eye)
+    {
+        device->SetRenderTarget(0, m_eyeSurf[eye]);
+        if (m_eyeDS[eye]) device->SetDepthStencilSurface(m_eyeDS[eye]);
+        device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
+    }
+
+    device->SetRenderTarget(0, savedRT);
+    if (savedRT) savedRT->Release();
+    device->SetDepthStencilSurface(savedDS);
+    if (savedDS) savedDS->Release();
 }
 
 void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
@@ -183,9 +201,9 @@ void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
 
 void StereoRenderer::OnPresent(IDirect3DDevice9* device)
 {
-    if (!m_active || !m_stereoSurf) return;
+    if (!m_active) return;
 
-    EndShadowPass(); // in case the game left a pass open at frame end
+    EndShadowPass(); // in case a shadow pass was left open (M2)
 
     if (Config::Get().dumpFrames > 0 && (m_presentCount++ % Config::Get().dumpFrames) == 0)
         DumpStereoSurface(device, m_dumpedFrames++);
@@ -193,27 +211,16 @@ void StereoRenderer::OnPresent(IDirect3DDevice9* device)
     if (Config::Get().outputMode == 1)
     {
         // M3: hand the stereo frame to OpenXR instead of the monitor.
-        OpenXRBridge::SubmitFrame(device, m_stereoSurf);
+        // (Bridge currently takes one surface; M3 will take both eyes.)
+        OpenXRBridge::SubmitFrame(device, m_eyeSurf[0]);
     }
     else
     {
         CompositeToBackbuffer(device);
     }
 
-    // Restore the game's RT0 and depth so the next frame starts clean.
-    if (m_gameRT)
-    {
-        device->SetRenderTarget(0, m_gameRT);
-        m_gameRT->Release();
-        m_gameRT = nullptr;
-    }
-    if (m_gameDS)
-    {
-        device->SetDepthStencilSurface(m_gameDS);
-        m_gameDS->Release();
-        m_gameDS = nullptr;
-    }
     m_active = false;
+    m_needClear = true;
 }
 
 void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
@@ -222,37 +229,107 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
     if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
         return;
 
-    D3DSURFACE_DESC desc{};
-    m_stereoSurf->GetDesc(&desc);
-    const LONG halfW = static_cast<LONG>(desc.Width / 2);
-    const LONG h     = static_cast<LONG>(desc.Height);
-
     D3DSURFACE_DESC bbDesc{};
     bb->GetDesc(&bbDesc);
-    const LONG bbHalfW = static_cast<LONG>(bbDesc.Width / 2);
-    const LONG bbH     = static_cast<LONG>(bbDesc.Height);
+    const LONG halfW = static_cast<LONG>(bbDesc.Width / 2);
+    const LONG bbH   = static_cast<LONG>(bbDesc.Height);
 
-    RECT srcL = { 0,     0, halfW,        h };
-    RECT srcR = { halfW, 0, halfW * 2,    h };
-    RECT dstL = { 0,       0, bbHalfW,     bbH };
-    RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
+    for (int eye = 0; eye < 2; ++eye)
+    {
+        if (!m_eyeSurf[eye]) continue;
+        D3DSURFACE_DESC srcDesc{};
+        m_eyeSurf[eye]->GetDesc(&srcDesc);
+        RECT src = { 0, 0, static_cast<LONG>(srcDesc.Width), static_cast<LONG>(srcDesc.Height) };
+        RECT dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
+        // D3DTEXF_NONE keeps this legal for equal-format surfaces.
+        device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
+    }
 
-    // D3DTEXF_NONE keeps this legal for equal-format surfaces.
-    HRESULT hrL = device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
-    HRESULT hrR = device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
     static bool s_loggedComposite = false;
     if (!s_loggedComposite)
     {
         s_loggedComposite = true;
-        if (FAILED(hrL) || FAILED(hrR))
-            LOG_ERROR("StereoRenderer: composite StretchRect failed hrL=0x%08X hrR=0x%08X", hrL, hrR);
-        else
-            LOG_INFO("StereoRenderer: composite OK (%ldx%ld -> %ldx%ld x2)",
-                     halfW, h, bbHalfW, bbH);
+        LOG_INFO("StereoRenderer: composite OK (%ux%u -> %ldx%ld x2)", m_eyeW, m_eyeH, halfW, bbH);
     }
 
     bb->Release();
 }
+
+// ---------------------------------------------------------------------------
+// RT0 tracking / diverted surfaces
+// ---------------------------------------------------------------------------
+
+void StereoRenderer::SetCurrentRT(IDirect3DSurface9* surf)
+{
+    if (surf == m_curRT) return;
+    m_curRT = surf;
+    m_curRTIsMain = false;
+    if (!surf || m_eyeW == 0) return;
+
+    D3DSURFACE_DESC d{};
+    if (FAILED(surf->GetDesc(&d))) return;
+    m_curRTIsMain = (d.Width == m_eyeW && d.Height == m_eyeH);
+
+    static int s_loggedRT = 0;
+    if (s_loggedRT < 20)
+    {
+        ++s_loggedRT;
+        LOG_INFO("SetCurrentRT: %p %ux%u main=%d (eye %ux%u)", surf, d.Width, d.Height,
+                 m_curRTIsMain ? 1 : 0, m_eyeW, m_eyeH);
+    }
+
+    if (m_curRTIsMain && Config::Get().enableStereo &&
+        surf != m_eyeSurf[0] && surf != m_eyeSurf[1] && !IsDiverted(surf))
+        m_diverted.push_back(surf);
+}
+
+bool StereoRenderer::IsDiverted(IDirect3DSurface9* surf) const
+{
+    for (const auto* s : m_diverted)
+        if (s == surf) return true;
+    return false;
+}
+
+void StereoRenderer::OnGameSetTexture(DWORD stage, IDirect3DBaseTexture9* tex)
+{
+    // Rebuild this stage's diverted/shadow bind state.
+    m_divertedBinds.erase(std::remove(m_divertedBinds.begin(), m_divertedBinds.end(), stage),
+                          m_divertedBinds.end());
+    for (size_t i = 0; i < m_shadowBinds.size(); ++i)
+        if (m_shadowBinds[i].first == stage)
+        { m_shadowBinds.erase(m_shadowBinds.begin() + i); break; }
+
+    if (!tex) return;
+
+    IDirect3DTexture9* tex9 = nullptr;
+    if (FAILED(tex->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&tex9))) || !tex9)
+        return;
+
+    IDirect3DSurface9* surf = nullptr;
+    if (SUCCEEDED(tex9->GetSurfaceLevel(0, &surf)) && surf)
+    {
+        if (IsDiverted(surf))
+            m_divertedBinds.push_back(stage);
+
+        SurfaceShadow* shadow = FindShadow(surf);
+        if (shadow)
+        {
+            if (!shadow->gameTex)
+            {
+                shadow->gameTex = tex9;
+                tex9->AddRef();
+            }
+            if (shadow->gameTex == tex9)
+                m_shadowBinds.push_back({ stage, shadow });
+        }
+        surf->Release();
+    }
+    tex9->Release();
+}
+
+// ---------------------------------------------------------------------------
+// Matrix capture / game state tracking
+// ---------------------------------------------------------------------------
 
 void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
 {
@@ -286,7 +363,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
     m_hasGameVp = true;
 }
 
-// --- M4 plumbing -----------------------------------------------------------
+void StereoRenderer::SetGameScissorRect(const RECT& r)
+{
+    m_gameScissor = r;
+    m_hasScissor  = true;
+}
+
+void StereoRenderer::SetScissorTestEnabled(bool enabled)
+{
+    m_scissorEnabled = enabled;
+}
+
+// --- M4 plumbing -------------------------------------------------------------
 
 void StereoRenderer::CheckRecenterKey()
 {
@@ -326,40 +414,52 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
 }
 
 // ---------------------------------------------------------------------------
+// Per-eye application
+// ---------------------------------------------------------------------------
 
 void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
 {
     const Config& cfg = Config::Get();
 
-    // Viewport: derived from the game's most recent intended viewport
-    // (tracked by hkSetViewport); falls back to querying the device.
-    D3DVIEWPORT9 vp;
-    if (m_hasGameVp) vp = m_gameVp;
-    else if (FAILED(device->GetViewport(&vp))) return;
-
     if (m_shadowActive)
     {
-        // Per-eye shadow targets are game-sized: full viewport, no offset.
+        // M2 shadow pass: per-eye shadow targets, shared shadow depth.
         device->SetRenderTarget(0, m_shadowActive->eyeSurf[eye]);
         if (m_shadowActive->depth)
             device->SetDepthStencilSurface(m_shadowActive->depth);
     }
     else
     {
-        vp.X = (eye == 0) ? 0 : vp.Width; // stereo target is 2x width
+        device->SetRenderTarget(0, m_eyeSurf[eye]);
+        if (m_eyeDS[eye])
+            device->SetDepthStencilSurface(m_eyeDS[eye]);
+    }
+
+    // Viewport: the game's intended viewport, used as-is - each eye target
+    // is game-sized, so no per-eye offset is needed anywhere.
+    D3DVIEWPORT9 vp;
+    if (m_hasGameVp) vp = m_gameVp;
+    else
+    {
+        vp.X = 0; vp.Y = 0;
+        vp.Width  = m_eyeW;
+        vp.Height = m_eyeH;
+        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
     }
     device->SetViewport(&vp);
 
-    // Scissor: same coordinate space as the target, so offset per eye.
-    if (m_scissorEnabled && m_hasScissor)
+    if (cfg.noZTest)
+        device->SetRenderState(D3DRS_ZENABLE, FALSE); // diagnostic: bypass depth
+
+    // Scissor: game coords, valid as-is on a game-sized eye target.
+    if (m_scissorEnabled)
     {
-        RECT r = m_gameScissor;
-        const LONG off = ActiveEyeOffset();
-        if (eye == 1) { r.left += off; r.right += off; }
+        RECT r = m_hasScissor ? m_gameScissor
+                              : RECT{ 0, 0, static_cast<LONG>(m_eyeW), static_cast<LONG>(m_eyeH) };
         device->SetScissorRect(&r);
     }
 
-    // Samplers bound to a shadowed surface get this eye's copy.
+    // Samplers bound to a shadowed surface get this eye's copy (M2).
     for (const auto& bind : m_shadowBinds)
         device->SetTexture(bind.first, bind.second->eyeTex[eye]);
 
@@ -369,7 +469,13 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
 
     // M4: head pose delta composes onto the captured view first.
     D3DMATRIX headView = ApplyHeadDelta(m_baseView);
-    D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
+
+    // UI passes use an orthographic projection (tiny z-scale, w == 1).
+    // Stereo-shifting those misaligns text against flat-drawn boxes, so
+    // draw them flat (identical in both eyes). 3D view/world matrices are
+    // orthonormal (|_33| ~ 1); viewproj matrices are non-affine.
+    const bool flatUI = std::fabs(headView._33) < 0.5f && std::fabs(headView._44 - 1.0f) < 0.01f;
+    D3DMATRIX eyeView  = flatUI ? headView : Mat::EyeView(headView, halfSep, eye);
 
     if (cfg.viewSource == 0)
     {
@@ -389,11 +495,12 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         // TODO(M0/M2): if VSMatrixIsViewProj, eyeView must be multiplied by the
         // captured projection matrix (asymmetric variant when enabled) here
         // instead of sent raw.
-        if (m_loggedEyes < 20) // TEMP DIAG: what do we actually upload per eye?
+        if (m_loggedEyes < 40 && m_viewCaptures > 2000) // TEMP DIAG: battle-period uploads
         {
             char buf[640];
             Mat::Format(eyeView, buf, sizeof(buf));
-            LOG_INFO("EyeMat eye=%d base._41=%.3f,%s", eye, m_baseView._41, buf);
+            LOG_INFO("EyeMat eye=%d cap=%u baseT=%.2f,%.2f,%.2f:%s", eye, m_viewCaptures,
+                     m_baseView._41, m_baseView._42, m_baseView._43, buf);
             ++m_loggedEyes;
         }
         device->SetVertexShaderConstantF(cfg.vsViewRegister,
@@ -403,8 +510,8 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
 
 void StereoRenderer::RestoreGameState(IDirect3DDevice9* device)
 {
-    if (m_shadowActive)
-        device->SetRenderTarget(0, m_shadowActive->eyeSurf[0]);
+    if (Config::Get().noZTest)
+        device->SetRenderState(D3DRS_ZENABLE, TRUE); // restore after diagnostic
     if (m_hasGameVp)
         device->SetViewport(&m_gameVp);
     if (m_scissorEnabled && m_hasScissor)
@@ -424,144 +531,9 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
     m_dupCalls  += drawCalls;
 }
 
-// --- Scissor tracking (M2) --------------------------------------------------
-
-void StereoRenderer::SetGameScissorRect(const RECT& r)
-{
-    m_gameScissor = r;
-    m_hasScissor  = true;
-}
-
-void StereoRenderer::SetScissorTestEnabled(bool enabled)
-{
-    m_scissorEnabled = enabled;
-}
-
-int StereoRenderer::ActiveEyeOffset() const
-{
-    if (m_shadowActive) return 0;
-    return StereoHalfWidth();
-}
-
-// --- Render-target routing --------------------------------------------------
-
-HRESULT StereoRenderer::HandleSetRenderTarget(IDirect3DDevice9* device, DWORD idx,
-                                              IDirect3DSurface9* surf)
-{
-    if (idx != 0 || !m_active)
-        return device->SetRenderTarget(idx, surf);
-
-    // Game returning to the surface we substituted at BeginScene.
-    if (surf && surf == m_gameRT)
-    {
-        Capture::Trace("SetRenderTarget: re-substituting stereo (surf=%p)", surf);
-        EndShadowPass();
-        if (m_stereoDS) device->SetDepthStencilSurface(m_stereoDS);
-        return device->SetRenderTarget(0, m_stereoSurf);
-    }
-
-    // Redundant re-set of the surface the active shadow is standing in for.
-    if (surf && m_shadowActive && surf == m_shadowActive->gameSurf)
-        return S_OK;
-
-    // Game moving to its own offscreen surface mid-frame.
-    if (Capture::TraceActive() && surf)
-    {
-        D3DSURFACE_DESC d{};
-        surf->GetDesc(&d);
-        Capture::Trace("SetRenderTarget: PASS-THROUGH (surf=%p %ux%u, m_gameRT=%p)",
-                       surf, d.Width, d.Height, m_gameRT);
-    }
-    EndShadowPass();
-    if (!surf || !Config::Get().offscreenPasses)
-        return device->SetRenderTarget(idx, surf);
-
-    SurfaceShadow* shadow = BeginShadowPass(device, surf);
-    if (!shadow)
-        return device->SetRenderTarget(idx, surf); // fall back to mono rendering
-
-    m_shadowActive = shadow;
-    return device->SetRenderTarget(0, shadow->eyeSurf[0]);
-}
-
-HRESULT StereoRenderer::HandleSetDepthStencil(IDirect3DDevice9* device, IDirect3DSurface9* ds)
-{
-    if (!m_active)
-        return device->SetDepthStencilSurface(ds);
-
-    // Remember the game's intent so OnPresent restores the right surface.
-    if (ds != m_gameDS)
-    {
-        if (m_gameDS) m_gameDS->Release();
-        m_gameDS = ds;
-        if (m_gameDS) m_gameDS->AddRef();
-    }
-
-    if (m_shadowActive)
-    {
-        if (ds && EnsureShadowDepth(device, *m_shadowActive, ds))
-            return device->SetDepthStencilSurface(m_shadowActive->depth);
-        return device->SetDepthStencilSurface(nullptr);
-    }
-    if (m_stereoDS)
-        return device->SetDepthStencilSurface(m_stereoDS);
-    return device->SetDepthStencilSurface(ds);
-}
-
-// --- Texture tracking -------------------------------------------------------
-
-void StereoRenderer::OnGameSetTexture(DWORD stage, IDirect3DBaseTexture9* tex)
-{
-    if (m_shadows.empty()) return; // no shadow passes seen yet; nothing to track
-
-    // Drop any active shadow bind on this stage; re-added below if the new
-    // texture is shadowed.
-    for (size_t i = 0; i < m_shadowBinds.size(); ++i)
-        if (m_shadowBinds[i].first == stage)
-        { m_shadowBinds.erase(m_shadowBinds.begin() + i); break; }
-
-    if (!tex) return;
-
-    IDirect3DTexture9* tex9 = nullptr;
-    if (FAILED(tex->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&tex9))) || !tex9)
-        return;
-
-    IDirect3DSurface9* surf = nullptr;
-    if (SUCCEEDED(tex9->GetSurfaceLevel(0, &surf)) && surf)
-    {
-        SurfaceShadow* shadow = FindShadow(surf);
-        if (shadow)
-        {
-            if (!shadow->gameTex)
-            {
-                shadow->gameTex = tex9;
-                tex9->AddRef();
-            }
-            if (shadow->gameTex == tex9)
-                m_shadowBinds.push_back({ stage, shadow });
-        }
-        surf->Release();
-    }
-    tex9->Release();
-}
-
-// --- Per-eye Clear while a shadow pass is bound -----------------------------
-
-HRESULT StereoRenderer::ClearBothEyes(IDirect3DDevice9* device, DWORD count, const D3DRECT* rects,
-                                      DWORD flags, D3DCOLOR color, float z, DWORD stencil)
-{
-    HRESULT hr = S_OK;
-    for (int eye = 0; eye < 2; ++eye)
-    {
-        device->SetRenderTarget(0, m_shadowActive->eyeSurf[eye]);
-        HRESULT r = device->Clear(count, rects, flags, color, z, stencil);
-        if (FAILED(r)) hr = r;
-    }
-    device->SetRenderTarget(0, m_shadowActive->eyeSurf[0]);
-    return hr;
-}
-
-// --- Offscreen shadow passes (M2) -------------------------------------------
+// ---------------------------------------------------------------------------
+// Offscreen shadow passes (M2 - dormant unless Config::offscreenPasses)
+// ---------------------------------------------------------------------------
 
 StereoRenderer::SurfaceShadow* StereoRenderer::FindShadow(IDirect3DSurface9* gameSurf)
 {
@@ -641,8 +613,6 @@ void StereoRenderer::ReleaseAllShadows()
     m_shadowActive = nullptr;
 }
 
-// The shadow pass needs a legal depth-stencil pairing: match the format of
-// whatever depth the game intends, sized to the (game-sized) eye targets.
 bool StereoRenderer::EnsureShadowDepth(IDirect3DDevice9* device, SurfaceShadow& s,
                                        IDirect3DSurface9* gameDS)
 {
@@ -671,43 +641,65 @@ bool StereoRenderer::EnsureShadowDepth(IDirect3DDevice9* device, SurfaceShadow& 
     return true;
 }
 
-// --- Debug: dump the stereo surface to a BMP --------------------------------
-// [Debug] DumpFrames=N dumps the stereo target of the first N presents to
-// WarbandVR_frameNNN.bmp next to the dll. Lets us see exactly what each eye
-// half contains without any VR hardware.
+HRESULT StereoRenderer::ClearBothEyes(IDirect3DDevice9* device, DWORD count, const D3DRECT* rects,
+                                      DWORD flags, D3DCOLOR color, float z, DWORD stencil)
+{
+    HRESULT hr = S_OK;
+    for (int eye = 0; eye < 2; ++eye)
+    {
+        device->SetRenderTarget(0, m_shadowActive ? m_shadowActive->eyeSurf[eye] : m_eyeSurf[eye]);
+        HRESULT r = device->Clear(count, rects, flags, color, z, stencil);
+        if (FAILED(r)) hr = r;
+    }
+    device->SetRenderTarget(0, m_shadowActive ? m_shadowActive->eyeSurf[0] : m_eyeSurf[0]);
+    return hr;
+}
+
+// ---------------------------------------------------------------------------
+// Debug: dump eye surfaces to BMPs
+// ---------------------------------------------------------------------------
 
 namespace { char g_dumpAnchor = 0; } // module-address anchor for GetModuleHandleEx
 
+static void WriteBmp(const char* path, IDirect3DSurface9* sys, UINT w, UINT h, LONG pitch,
+                     const unsigned char* bits)
+{
+    FILE* f = nullptr;
+    fopen_s(&f, path, "wb");
+    if (!f) return;
+    #pragma pack(push, 1)
+    struct { char id[2]; unsigned size, r1, off; unsigned hdr, w, h; unsigned short planes, bpp;
+             unsigned comp, img, xppm, yppm, colors, important; } hdr = {};
+    #pragma pack(pop)
+    const unsigned pixelBytes = w * 3 * h;
+    hdr.id[0] = 'B'; hdr.id[1] = 'M';
+    hdr.off = 54;
+    hdr.size = 54 + pixelBytes;
+    hdr.hdr = 40; hdr.w = w; hdr.h = h;
+    hdr.planes = 1; hdr.bpp = 24;
+    hdr.img = pixelBytes;
+    fwrite(&hdr, 1, 54, f);
+    for (int y = (int)h - 1; y >= 0; --y)
+    {
+        const unsigned char* srcRow = bits + (size_t)y * pitch;
+        unsigned char row[4096 * 3];
+        for (UINT x0 = 0; x0 < w; x0 += 4096)
+        {
+            UINT n = (w - x0 < 4096) ? (w - x0) : 4096;
+            for (UINT x = 0; x < n; ++x)
+            {
+                row[x * 3 + 0] = srcRow[(x0 + x) * 4 + 0];
+                row[x * 3 + 1] = srcRow[(x0 + x) * 4 + 1];
+                row[x * 3 + 2] = srcRow[(x0 + x) * 4 + 2];
+            }
+            fwrite(row, 1, n * 3, f);
+        }
+    }
+    fclose(f);
+}
+
 void StereoRenderer::DumpStereoSurface(IDirect3DDevice9* device, int index)
 {
-    if (!m_stereoSurf) return;
-    D3DSURFACE_DESC desc{};
-    m_stereoSurf->GetDesc(&desc);
-
-    IDirect3DSurface9* sys = nullptr;
-    HRESULT hr = device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
-                                                     D3DPOOL_SYSTEMMEM, &sys, nullptr);
-    if (FAILED(hr) || !sys)
-    {
-        LOG_WARN("DumpStereoSurface: CreateOffscreenPlainSurface failed hr=0x%08X", hr);
-        return;
-    }
-    hr = device->GetRenderTargetData(m_stereoSurf, sys);
-    if (FAILED(hr))
-    {
-        LOG_WARN("DumpStereoSurface: GetRenderTargetData failed hr=0x%08X", hr);
-        sys->Release();
-        return;
-    }
-
-    D3DLOCKED_RECT lr{};
-    if (FAILED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
-    {
-        sys->Release();
-        return;
-    }
-
-    char path[MAX_PATH];
     char dllDir[MAX_PATH] = {};
     HMODULE self = nullptr;
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -716,47 +708,32 @@ void StereoRenderer::DumpStereoSurface(IDirect3DDevice9* device, int index)
     GetModuleFileNameA(self, dllDir, MAX_PATH);
     char* slash = strrchr(dllDir, '\\');
     if (slash) slash[1] = '\0';
-    snprintf(path, MAX_PATH, "%sWarbandVR_frame%03d.bmp", dllDir, index);
 
-    const int w = (int)desc.Width, h = (int)desc.Height;
-    const int rowBytes = w * 3;
-    const unsigned pixelBytes = rowBytes * h;
-    FILE* f = nullptr;
-    fopen_s(&f, path, "wb");
-    if (f)
+    for (int eye = 0; eye < 2; ++eye)
     {
-        #pragma pack(push, 1)
-        struct { char id[2]; unsigned size, r1, off; unsigned hdr, w, h; unsigned short planes, bpp;
-                 unsigned comp, img, xppm, yppm, colors, important; } hdr = {};
-        #pragma pack(pop)
-        hdr.id[0] = 'B'; hdr.id[1] = 'M';
-        hdr.off = 54;
-        hdr.size = 54 + pixelBytes;
-        hdr.hdr = 40; hdr.w = w; hdr.h = h;
-        hdr.planes = 1; hdr.bpp = 24;
-        hdr.img = pixelBytes;
-        fwrite(&hdr, 1, 54, f);
-        // BMP is bottom-up BGR; source is top-down BGRA (X8R8G8B8)
-        for (int y = h - 1; y >= 0; --y)
+        if (!m_eyeSurf[eye]) continue;
+        D3DSURFACE_DESC desc{};
+        m_eyeSurf[eye]->GetDesc(&desc);
+
+        IDirect3DSurface9* sys = nullptr;
+        HRESULT hr = device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+                                                         D3DPOOL_SYSTEMMEM, &sys, nullptr);
+        if (FAILED(hr) || !sys) continue;
+        hr = device->GetRenderTargetData(m_eyeSurf[eye], sys);
+        if (SUCCEEDED(hr))
         {
-            const unsigned char* srcRow = (const unsigned char*)lr.pBits + (size_t)y * lr.Pitch;
-            // Convert BGRA -> BGR in chunks to avoid a full-size stack buffer
-            unsigned char row[4096 * 3];
-            for (int x0 = 0; x0 < w; x0 += 4096)
+            D3DLOCKED_RECT lr{};
+            if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
             {
-                int n = (w - x0 < 4096) ? (w - x0) : 4096;
-                for (int x = 0; x < n; ++x)
-                {
-                    row[x * 3 + 0] = srcRow[(x0 + x) * 4 + 0];
-                    row[x * 3 + 1] = srcRow[(x0 + x) * 4 + 1];
-                    row[x * 3 + 2] = srcRow[(x0 + x) * 4 + 2];
-                }
-                fwrite(row, 1, n * 3, f);
+                char path[MAX_PATH];
+                snprintf(path, MAX_PATH, "%sWarbandVR_frame%03d_%c.bmp", dllDir, index,
+                         eye == 0 ? 'L' : 'R');
+                WriteBmp(path, sys, desc.Width, desc.Height, lr.Pitch,
+                         static_cast<const unsigned char*>(lr.pBits));
+                LOG_INFO("DumpStereoSurface: wrote %s", path);
+                sys->UnlockRect();
             }
         }
-        fclose(f);
-        LOG_INFO("DumpStereoSurface: wrote %s (%ux%u)", path, w, h);
+        sys->Release();
     }
-    sys->UnlockRect();
-    sys->Release();
 }

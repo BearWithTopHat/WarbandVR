@@ -14,19 +14,77 @@
 // ---------------------------------------------------------------------------
 namespace
 {
-    // Execute one game draw call for both eyes. `draw` invokes the ORIGINAL.
-    // primCount drives the UI heuristic: tiny batches (HUD text, icons) are
-    // drawn once, mono, when SBSMonoUI is on - doubling them buys nothing and
-    // produces the classic "double vision UI" artifact.
+    // 2D / fullscreen-quad path: draw into BOTH eye targets without any view
+    // or projection shift. UI and the engine's composite quads stay flat and
+    // identical in both eyes.
+    template <typename F>
+    HRESULT DrawMonoBothHalves(IDirect3DDevice9* dev, F&& draw)
+    {
+        IDirect3DSurface9* savedRT = nullptr;
+        IDirect3DSurface9* savedDS = nullptr;
+        dev->GetRenderTarget(0, &savedRT);
+        dev->GetDepthStencilSurface(&savedDS);
+
+        DeviceHooks::Get().m_internal = true;
+        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0));
+        DeviceHooks::Get().m_internal = false;
+        HRESULT hrL = draw();
+
+        DeviceHooks::Get().m_internal = true;
+        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1));
+        DeviceHooks::Get().m_internal = false;
+        HRESULT hrR = draw();
+
+        DeviceHooks::Get().m_internal = true;
+        dev->SetRenderTarget(0, savedRT);
+        dev->SetDepthStencilSurface(savedDS);
+        StereoRenderer::Get().RestoreGameState(dev);
+        DeviceHooks::Get().m_internal = false;
+        if (savedRT) savedRT->Release();
+        if (savedDS) savedDS->Release();
+        return FAILED(hrL) ? hrL : hrR;
+    }
+
+    // Execute one game draw call for both eyes, each into its own game-sized
+    // target. `draw` invokes the ORIGINAL. primCount drives the UI heuristic:
+    // tiny batches (HUD text, icons, the engine's fullscreen composite quad)
+    // are drawn per eye WITHOUT the eye view shift when SBSMonoUI is on, so
+    // UI stays flat and identical in both eyes instead of getting stereo
+    // separation.
     template <typename F>
     HRESULT DrawBothEyes(IDirect3DDevice9* dev, int primCount, F&& draw)
     {
         const Config& cfg = Config::Get();
+
+        // The draw samples a diverted surface (e.g. the world texture feeding
+        // the final composite blit). Its content is already in the eye
+        // targets; drawing it would paint an empty surface over the frame.
+        if (StereoRenderer::Get().DivertedTextureBound())
+        {
+            if (Capture::TraceActive())
+                Capture::Trace("SKIP draw (diverted texture) primCount=%d", primCount);
+            return S_OK;
+        }
+
+        // The game's own offscreen business (shadow map etc.): pass through,
+        // stock behavior - its textures keep their content for the game.
+        if (!StereoRenderer::Get().CurrentRTIsMain())
+        {
+            if (Capture::TraceActive())
+                Capture::Trace("MONO draw (offscreen RT) primCount=%d", primCount);
+            return draw();
+        }
+
         if (cfg.sbsMonoUI && primCount > 0 && primCount <= cfg.uiMaxTriangles)
-            return draw(); // single mono draw
+            return DrawMonoBothHalves(dev, draw);
 
         LARGE_INTEGER t0, t1;
         QueryPerformanceCounter(&t0);
+
+        IDirect3DSurface9* savedRT = nullptr;
+        IDirect3DSurface9* savedDS = nullptr;
+        dev->GetRenderTarget(0, &savedRT);
+        dev->GetDepthStencilSurface(&savedDS);
 
         DeviceHooks::Get().m_internal = true;
         StereoRenderer::Get().ApplyEye(dev, 0);
@@ -39,8 +97,12 @@ namespace
         HRESULT hrR = draw();
 
         DeviceHooks::Get().m_internal = true;
+        dev->SetRenderTarget(0, savedRT);
+        dev->SetDepthStencilSurface(savedDS);
         StereoRenderer::Get().RestoreGameState(dev);
         DeviceHooks::Get().m_internal = false;
+        if (savedRT) savedRT->Release();
+        if (savedDS) savedDS->Release();
 
         // Report the first failure; previously a failing left-eye draw was
         // silently masked by the right-eye result.
@@ -96,31 +158,25 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d,
 
 HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DSurface9* surf)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
+    if (DeviceHooks::Get().m_internal)
         return dev->SetRenderTarget(idx, surf);
-    Capture::Trace("SetRenderTarget(%u, %p)", idx, surf);
 
-    // Routed through StereoRenderer: re-applies the stereo substitution when
-    // the game returns to its main target, and (M2, OffscreenPasses=1) gives
-    // the game's own mid-frame targets per-eye shadow copies.
-    DeviceHooks::Get().m_internal = true;
-    HRESULT hr = StereoRenderer::Get().HandleSetRenderTarget(dev, idx, surf);
-    DeviceHooks::Get().m_internal = false;
-    return hr;
+    // Track-only: we need the current target's size to decide whether this
+    // scene is main-frame (duplicate per eye) or the game's own offscreen
+    // business (pass through untouched).
+    if (idx == 0)
+    {
+        StereoRenderer::Get().SetCurrentRT(surf);
+        Capture::Trace("SetRenderTarget(%u, %p)", idx, surf);
+    }
+    return dev->SetRenderTarget(idx, surf);
 }
 
 HRESULT __stdcall hkSetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurface9* ds)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
-        return dev->SetDepthStencilSurface(ds);
-
-    // The game re-pointing the depth buffer mid-frame would pair its small
-    // depth surface with our double-width target (illegal in D3D9); the
-    // renderer substitutes the matching stereo/shadow depth instead.
-    DeviceHooks::Get().m_internal = true;
-    HRESULT hr = StereoRenderer::Get().HandleSetDepthStencil(dev, ds);
-    DeviceHooks::Get().m_internal = false;
-    return hr;
+    // Pure pass-through: eye draws bind their own per-eye depth; the game's
+    // own scenes keep their own depth buffer.
+    return dev->SetDepthStencilSurface(ds);
 }
 
 HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
@@ -155,8 +211,9 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
         return dev->Clear(count, rects, flags, color, z, stencil);
     Capture::Trace("Clear(count=%u rects=%p flags=0x%X z=%.2f)", count, rects, flags, z);
 
-    // While a shadow pass is bound the target is per-eye (game-sized), so
-    // Clear must run once per eye with unshifted rects.
+    // The game clears its own target - pass through as-is. The eye targets
+    // are cleared by StereoRenderer once per frame. (M2 shadow passes are
+    // the one exception: their per-eye targets need per-eye clears.)
     if (StereoRenderer::Get().ShadowActive())
     {
         DeviceHooks::Get().m_internal = true;
@@ -164,32 +221,7 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
         DeviceHooks::Get().m_internal = false;
         return hr;
     }
-
-    if (rects == nullptr)
-    {
-        // Whole-target clear covers both eyes in one call.
-        return dev->Clear(count, rects, flags, color, z, stencil);
-    }
-
-    // Region clears are in surface coordinates, so they must be duplicated
-    // per eye with each half's horizontal offset (unlike viewports, Clear
-    // rects do NOT follow the viewport).
-    const LONG halfW = static_cast<LONG>(StereoRenderer::Get().ActiveEyeOffset());
-    HRESULT hr = S_OK;
-    for (int eye = 0; eye < 2; ++eye)
-    {
-        const LONG offset = (eye == 0) ? 0 : halfW;
-        std::vector<D3DRECT> eyeRects(count);
-        for (DWORD i = 0; i < count; ++i)
-        {
-            eyeRects[i].x1 = rects[i].x1 + offset;
-            eyeRects[i].x2 = rects[i].x2 + offset;
-            eyeRects[i].y1 = rects[i].y1;
-            eyeRects[i].y2 = rects[i].y2;
-        }
-        hr = dev->Clear(count, eyeRects.data(), flags, color, z, stencil);
-    }
-    return hr;
+    return dev->Clear(count, rects, flags, color, z, stencil);
 }
 
 HRESULT __stdcall hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE state, const D3DMATRIX* m)
@@ -271,7 +303,8 @@ HRESULT __stdcall hkDrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     if (DeviceHooks::Get().m_internal || !StereoOn())
         return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count);
     if (Capture::TraceActive())
-        Capture::Trace("DrawIndexedPrimitive(type=%d numVerts=%u count=%u)", type, numVertices, count);
+        Capture::Trace("DrawIndexedPrimitive(type=%d numVerts=%u count=%u) rhw=%d", type, numVertices, count,
+                       DeviceHooks::Get().CurrentDrawIsRHW() ? 1 : 0);
     return DrawBothEyes(dev, static_cast<int>(count), [&] {
         return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count); });
 }
@@ -349,4 +382,35 @@ void DeviceHooks::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PAR
 void DeviceHooks::Shutdown()
 {
     m_device = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Vertex-format tracking (diagnostics)
+// ---------------------------------------------------------------------------
+
+void DeviceHooks::TrackVertexDeclaration(IDirect3DVertexDeclaration9* decl)
+{
+    m_curIsRHW = false;
+    if (!decl) return;
+    D3DVERTEXELEMENT9 elems[32];
+    UINT num = 0;
+    if (FAILED(decl->GetDeclaration(elems, &num))) return;
+    for (UINT i = 0; i < num && i < 32; ++i)
+        if (elems[i].Usage == D3DDECLUSAGE_POSITIONT)
+        {
+            m_curIsRHW = true;
+            static bool logged = false;
+            if (!logged) { logged = true; LOG_INFO("DeviceHooks: RHW (pre-transformed) vertex declaration detected"); }
+            break;
+        }
+}
+
+void DeviceHooks::TrackFVF(DWORD fvf)
+{
+    m_curIsRHW = (fvf & D3DFVF_XYZRHW) == D3DFVF_XYZRHW;
+    if (m_curIsRHW)
+    {
+        static bool logged = false;
+        if (!logged) { logged = true; LOG_INFO("DeviceHooks: D3DFVF_XYZRHW (pre-transformed) FVF detected"); }
+    }
 }

@@ -140,6 +140,56 @@ Bonus finding: Warband never calls `SetTransform` (menu/loading) — it is
 almost certainly fully shader-driven, so expect `ViewSource=1`; the M0
 capture must run in a 3D scene to rank VS registers.
 
+### 2026-10-01 (iteration 5) — The half-screen saga: Z-prepass + EQUAL
+Weeks of on-game iteration produced a consistent symptom: **left half =
+perfect full frame, right half = skybox only** (plus 3D-tracked markers).
+Eliminated in turn, each with instrumentation or a discriminating
+experiment: SBS composite (StretchRect verified OK), RT routing (main
+scenes verified substituted), the SBSMonoUI mono-composite-quad bug
+(user-supplied patch — real bug, but insufficient alone), the default
+scissor rect (game enables scissor test but never sets a rect; widened),
+the `DuplicationActive` gate (only shadow scenes were mono), RHW
+pre-transformed geometry (traced: all battle draws are rhw=0), stale
+right-half depth (clears verified full-target), per-eye matrices
+(verified correct ±0.049 view-space shift), and a viewport-swap test
+(terrain follows the left half regardless of eye).
+The two experiments that cracked it: **BothEyesLeft** (both eyes into the
+left half → double vision proves eye-1 draws render fine) and **NoZTest**
+(depth testing disabled → the world appears in BOTH halves). Final root
+cause: **Warband uses a Z-prepass that renders mono** (its scene is never
+stereo-substituted), writing depth only into the left half of the
+double-width depth buffer; the color pass tests **ZFUNC_EQUAL** — the left
+half matches, the right half (depth still at the 1.0 clear value) passes
+only far-plane sky. Every right-eye draw failed EQUAL, forever.
+This invalidated the entire single-double-width-target architecture.
+
+### 2026-10-01 (iteration 6) — Per-eye game-sized surfaces (M1 done)
+Replaced the single 2W×H stereo target + double-width depth with **two
+game-sized render targets + two game-sized depth buffers** (one pair per
+eye). Every intercepted main-frame draw reroutes into the current eye's
+target (RT0/DS saved and restored around the pair). Consequences, all
+verified on-game:
+- The Z-prepass now runs per eye with per-eye depth: EQUAL passes in both
+  halves; battle scenes render with correct occlusion in both eyes.
+- The game's own coordinate space (viewports, scissor, RHW vertices,
+  offscreen passes) works per eye exactly as mono — no clipping class of
+  bugs remains.
+- Scenes whose RT0 is not backbuffer-sized (the 256×256 shadow map) pass
+  through untouched, so the game's own textures keep their content.
+- Draws sampling a "diverted" main-sized surface (its scene was rerouted
+  to the eye targets, e.g. the world texture feeding the final composite
+  blit) are skipped — the blit would paint an empty surface over the frame.
+- Gate fix: scenes where the game never calls SetRenderTarget (the menu,
+  default backbuffer) must count as main-frame; RT0 is now queried at
+  every BeginScene.
+- UI passes (orthographic projection, tiny z-scale) are drawn flat in both
+  eyes so text aligns with flat-drawn boxes.
+Verified: stock boot clean; splash/menu SBS; battle with terrain, trees,
+characters, HUD in both halves with correct depth; `Reset` survived; no
+ERR/WARN. Known deferred items: cursor offset (game hit-tests in
+3840-wide coordinates while halves are squished — UI remap later),
+IPD/WorldScale tuning, menu-only cursor.
+
 ## Session log
 
 - **2026-10-01** — Scaffold created: proxy, IDirect3D9 wrapper, 15 device
@@ -175,3 +225,39 @@ capture must run in a 3D scene to rank VS registers.
   fully shader-driven (`ViewSource=1`); M0 capture needs a 3D scene. Next
   action: human runs CaptureMode=2 in a battle to identify the VS view
   register, then visual SBS check.
+- **2026-10-01 (iterations 5–6)** — The half-screen saga. Weeks of
+  experiments (BMP surface dumps, CaptureMode=4 frame traces, scissor
+  probes, viewport swaps) chased the "world left, sky right" symptom
+  through a dozen eliminated theories until **NoZTest** proved the world
+  renders in both halves with depth off: the game's mono **Z-prepass**
+  only fed the left half's depth, and the **ZFUNC_EQUAL** color pass
+  killed every right-eye draw. Replaced the double-width stereo target
+  with **per-eye game-sized render targets + depth buffers**; draws
+  reroute per eye, offscreen scenes pass through, diverted-texture blits
+  are skipped, ortho-UI passes draw flat. **M1 stereo works**: battle and
+  menu render side-by-side with correct occlusion in both eyes. Also
+  integrated a user-supplied patch (mono composite-quad coverage,
+  pre-substitution viewport capture) along the way. Next: IPD/WorldScale
+  tuning, cursor/UI remap, then M2 polish.
+
+### 2026-10-02 — Fix: mono-UI heuristic must still cover both eyes
+First on-game test showed the classic half-screen symptom: full frame in the
+left half, sky-only in the right. Root cause: `SBSMonoUI` drew <=64-triangle
+batches ONCE into the current viewport (the left half), and Warband's final
+fullscreen composite quad is exactly such a draw - so the complete frame only
+ever reached the left half of the stereo target. Fixed: the UI path now draws
+per eye WITHOUT the view shift (`ApplyEyeMono`), and a new
+`DuplicationActive()` gate stops per-eye duplication entirely while the game
+renders to its own offscreen surfaces (where the right eye's viewport would
+be clipped against the game-sized target). Also fixed: the game viewport is
+now captured BEFORE the RT substitution (D3D9 resets the viewport to the full
+new target on SetRenderTarget, which poisoned the post-substitution
+GetViewport fallback).
+
+## Session log
+
+- **2026-10-02** — First on-game run: stock boot OK, stereo active, but
+  half-screen output. Diagnosed from photos + code review; shipped
+  half-screen fix (mono-UI per-eye coverage, DuplicationActive gate,
+  pre-substitution viewport capture). Next: rerun with the fix; keep
+  `[Debug] DumpFrames=5` ready if anything is still off.

@@ -81,3 +81,11 @@ needs the headset; M5 needs your sword arm.
 | `[CAMERASCAN] converged to N candidates` | M0-C: camera position candidates |
 | `[PERF] ... ms/frame` | duplication overhead (M2 budget: <4 ms) |
 | any `ERR` | stop; feed log to agent |
+
+
+## Troubleshooting: symptoms seen so far
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Full game in left half, sky-only right half (fixed 2026-10-02) | Fullscreen composite quad (2 tris) hit the "draw once" UI heuristic and only ever covered the left half of the stereo target | Update to the patched `StereoRenderer`/`DeviceHooks`; see docs/06 entry of 2026-10-02 |
+| Anything else new | unknown | Set `[Debug] DumpFrames=5`, grab `WarbandVR_frameNNN.bmp` + `WarbandVR_log.txt`, hand both to the agent - the dump shows exactly what each eye half contains |

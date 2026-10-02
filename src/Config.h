@@ -38,7 +38,10 @@ struct Config
     int   logLevel              = 2;
     int   logViewMatrices       = 25;
     int   captureMode           = 0;      // 0 off, 1 SetTransform, 2 VS consts
-    int   dumpFrames            = 0;      // dump stereo surface of first N presents to BMP
+    int   dumpFrames            = 500;      // dump stereo surface of first N presents to BMP
+    bool  swapEyeViewports      = false;  // diagnostic: draw each eye into the opposite half
+    bool  bothEyesLeft          = false;  // diagnostic: draw both eyes into the left half
+    bool  noZTest               = false;  // diagnostic: disable depth testing on eye draws
     bool  cameraScan            = false;
     float expectedPos[3]        = { 0, 0, 0 };
     bool  hasExpectedPos        = false;

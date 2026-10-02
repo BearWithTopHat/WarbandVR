@@ -37,11 +37,11 @@ three questions:
 Deliverable: with `EnableStereo=1, OutputMode=0`, the game renders
 side-by-side stereo to the normal monitor.
 
-- [x] Proxy loads, game boots stock with `EnableStereo=0` (invariant) — verified on the real game: CreateDevice OK, DeviceProxy wraps the device, clean log; `EnableStereo=1` also boots clean (substitution + Reset verified)
-- [ ] SBS image in first-person on foot: two views, correct parallax
-- [ ] SBS image in a field battle with 100+ agents
+- [x] Proxy loads, game boots stock with `EnableStereo=0` (invariant) — verified on the real game: CreateDevice OK, DeviceProxy wraps the device, clean log; `EnableStereo=1` also boots clean
+- [x] SBS image in first-person on foot: two views, correct parallax (per-eye game-sized targets; verified with correct occlusion)
+- [x] SBS image in a field battle with 100+ agents
 - [ ] IPD/WorldScale feel right (cross-eye check or record + review)
-- [ ] No crash on window resize / alt-tab / `Reset`
+- [x] No crash on window resize / alt-tab / `Reset`
 
 ## M2 — Correctness & performance hardening
 **Effort:** 1–3 weeks · asymmetric projection, UI mono-draw, per-eye clears,

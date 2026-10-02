@@ -47,6 +47,12 @@ public:
     void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp);
     void Shutdown();
 
+    // Vertex-format tracking (diagnostics): detects CPU-transformed (RHW)
+    // geometry, which ignores all matrix and viewport manipulation.
+    void TrackVertexDeclaration(IDirect3DVertexDeclaration9* decl);
+    void TrackFVF(DWORD fvf);
+    bool CurrentDrawIsRHW() const { return m_curIsRHW; }
+
     // Reentrancy guard: true while OUR code is executing D3D calls.
     // Every detour checks this first and passes straight through when set.
     bool m_internal = false;
@@ -56,4 +62,5 @@ private:
 
     IDirect3DDevice9* m_device = nullptr;
     D3DPRESENT_PARAMETERS m_pp = {};
+    bool m_curIsRHW = false;
 };
