@@ -344,10 +344,20 @@ HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, co
                            f[0], f[1], f[2], f[3]);
         }
         if (Config::Get().enableStereo && Config::Get().viewSource == 1 &&
-            reg == static_cast<UINT>(Config::Get().vsViewRegister) && count >= 4 && data)
+            reg == static_cast<UINT>(Config::Get().vsViewRegister) && count >= 3 && data)
         {
+            // UI passes often upload per-element matrices as 3x4 (count=3);
+            // capture those too, with the affine fourth row implicit.
             D3DMATRIX m;
-            memcpy(&m, data, sizeof(D3DMATRIX));
+            if (count >= 4)
+            {
+                memcpy(&m, data, sizeof(D3DMATRIX));
+            }
+            else
+            {
+                memcpy(&m, data, 3 * 4 * sizeof(float));
+                m._41 = 0.0f; m._42 = 0.0f; m._43 = 0.0f; m._44 = 1.0f;
+            }
             StereoRenderer::Get().CaptureViewMatrix(m);
         }
     }

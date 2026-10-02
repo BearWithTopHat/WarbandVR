@@ -40,6 +40,8 @@ side-by-side stereo to the normal monitor.
 - [x] Proxy loads, game boots stock with `EnableStereo=0` (invariant) — verified on the real game: CreateDevice OK, DeviceProxy wraps the device, clean log; `EnableStereo=1` also boots clean
 - [x] SBS image in first-person on foot: two views, correct parallax (per-eye game-sized targets; verified with correct occlusion)
 - [x] SBS image in a field battle with 100+ agents
+- [x] Menu/UI text aligns with its buttons (per-draw register readback replaces captured matrices)
+- [ ] Encounter dialog option layout matches stock (open bug: options spread/reordered under stereo; not present with `EnableStereo=0`)
 - [ ] IPD/WorldScale feel right (cross-eye check or record + review)
 - [x] No crash on window resize / alt-tab / `Reset`
 

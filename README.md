@@ -19,6 +19,7 @@ to the Steam Frame works exactly like the flat game already does for you.
 | **Per-eye game-sized render targets + depth (draw rerouting)** | Implemented — **the architecture that finally worked** |
 | Side-by-side monitor output (battle + menu, correct occlusion) | **Verified on the real game** |
 | Flat-UI passes (ortho-projection detection) | Implemented — text aligns with boxes |
+| Per-draw VS register readback (no captured-matrix stamping) | Implemented — main menu + most windows correct; **encounter dialog option layout still wrong under stereo** |
 | M0 capture tooling (VS register shadowing, mode 2/3 ranking + dumps) | Implemented — register map known (c0 = per-draw transform stream) |
 | M0 memory scanner (camera-struct candidate finder) | Implemented — unused so far |
 | Per-eye scissor, per-eye clears, viewport tracking | Implemented (superseded by per-eye model) |

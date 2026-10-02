@@ -261,3 +261,27 @@ GetViewport fallback).
   half-screen fix (mono-UI per-eye coverage, DuplicationActive gate,
   pre-substitution viewport capture). Next: rerun with the fix; keep
   `[Debug] DumpFrames=5` ready if anything is still off.
+
+### 2026-10-02 — Readback-based register handling; open encounter-dialog bug
+Captured view matrices turned out to be unusable for UI: Warband uploads
+per-element transforms as 3x4 `SetVertexShaderConstantF(count=3)` writes and
+many UI passes never re-upload before drawing, so any captured matrix stamps
+stale state on the wrong element (misaligned/reordered text). Replaced with a
+**per-draw-pair readback**: `ApplyEye` reads the game's actual c0 via
+`GetVertexShaderConstantF` once per eye pair, skips the upload entirely for
+ortho-UI matrices (`|_33|<0.5, _44==1`), otherwise uploads
+`EyeView(readback)`; `RestoreGameState` puts the game's own value back. Main
+menu, most windows, battles, and the world map now render correctly in both
+eyes.
+
+**Open bug:** the encounter ("You have encountered...") dialog lays its
+options out wrong under stereo (spread out / wrong order vs stock's tight
+bottom cluster; highlight mismatch follows from the known cursor offset).
+Confirmed NOT present with `EnableStereo=0`, so passthrough and the capture
+hooks are clean. Reasoning so far: `EyeView` only injects a world-space X
+translation, so a *vertical* layout change cannot come from the c0 upload at
+all - suspects are the diverted-surface skip, `m_gameVp` tracking, or the
+game baking dialog layout from device state that differs mid-frame. Diag
+build in the tree logs each pair's actual register + live viewport vs
+`m_gameVp` (`RB cap=...` lines); next step is key-triggered logging/dump so
+the capture lands exactly on the dialog.

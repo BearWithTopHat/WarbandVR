@@ -463,22 +463,22 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
     for (const auto& bind : m_shadowBinds)
         device->SetTexture(bind.first, bind.second->eyeTex[eye]);
 
-    if (!m_hasView) return; // nothing captured yet; draws will match mono
+    if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
 
     const float halfSep = (cfg.ipd * cfg.worldScale) * 0.5f;
 
-    // M4: head pose delta composes onto the captured view first.
-    D3DMATRIX headView = ApplyHeadDelta(m_baseView);
-
-    // UI passes use an orthographic projection (tiny z-scale, w == 1).
-    // Stereo-shifting those misaligns text against flat-drawn boxes, so
-    // draw them flat (identical in both eyes). 3D view/world matrices are
-    // orthonormal (|_33| ~ 1); viewproj matrices are non-affine.
-    const bool flatUI = std::fabs(headView._33) < 0.5f && std::fabs(headView._44 - 1.0f) < 0.01f;
-    D3DMATRIX eyeView  = flatUI ? headView : Mat::EyeView(headView, halfSep, eye);
-
     if (cfg.viewSource == 0)
     {
+        // M4: head pose delta composes onto the captured view first.
+        D3DMATRIX headView = ApplyHeadDelta(m_baseView);
+
+        // UI passes use an orthographic projection (tiny z-scale, w == 1).
+        // Stereo-shifting those misaligns text against flat-drawn boxes, so
+        // draw them flat (identical in both eyes). 3D view/world matrices are
+        // orthonormal (|_33| ~ 1); viewproj matrices are non-affine.
+        const bool flatUI = std::fabs(headView._33) < 0.5f && std::fabs(headView._44 - 1.0f) < 0.01f;
+        D3DMATRIX eyeView  = flatUI ? headView : Mat::EyeView(headView, halfSep, eye);
+
         // Fixed-function path: overwrite the VIEW transform for this eye.
         device->SetTransform(D3DTS_VIEW, &eyeView);
 
@@ -491,20 +491,44 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
     }
     else
     {
-        // Shader path: overwrite the register holding the view (or viewproj).
-        // TODO(M0/M2): if VSMatrixIsViewProj, eyeView must be multiplied by the
-        // captured projection matrix (asymmetric variant when enabled) here
-        // instead of sent raw.
-        if (m_loggedEyes < 40 && m_viewCaptures > 2000) // TEMP DIAG: battle-period uploads
+        // Shader path: read back the game's ACTUAL current register - never
+        // trust a captured matrix. UI passes often don't re-upload before
+        // every draw, so any captured value can stamp the wrong transform
+        // on the wrong element (misaligned/reordered text). The readback is
+        // taken once per eye pair (eye 1 would otherwise read eye 0's
+        // already-shifted upload).
+        if (eye == 0 || !m_readbackValid)
         {
-            char buf[640];
-            Mat::Format(eyeView, buf, sizeof(buf));
-            LOG_INFO("EyeMat eye=%d cap=%u baseT=%.2f,%.2f,%.2f:%s", eye, m_viewCaptures,
-                     m_baseView._41, m_baseView._42, m_baseView._43, buf);
-            ++m_loggedEyes;
+            float cur[16] = {};
+            if (FAILED(device->GetVertexShaderConstantF(cfg.vsViewRegister, cur, 4)))
+                return;
+            memcpy(&m_lastReadback, cur, sizeof(m_lastReadback));
+            m_readbackValid = true;
+            if (m_loggedRB < 200) // TEMP DIAG: every pair's actual register
+            {
+                ++m_loggedRB;
+                D3DVIEWPORT9 vpNow{};
+                device->GetViewport(&vpNow);
+                LOG_INFO("RB cap=%u t=%.3f,%.3f,%.3f m33=%.3f m44=%.3f vp=%u,%u %ux%u gamevp=%u,%u %ux%u",
+                         m_viewCaptures,
+                         m_lastReadback._41, m_lastReadback._42, m_lastReadback._43,
+                         m_lastReadback._33, m_lastReadback._44,
+                         vpNow.X, vpNow.Y, vpNow.Width, vpNow.Height,
+                         m_gameVp.X, m_gameVp.Y, m_gameVp.Width, m_gameVp.Height);
+            }
         }
-        device->SetVertexShaderConstantF(cfg.vsViewRegister,
-                                         reinterpret_cast<const float*>(&eyeView), 4);
+
+        const D3DMATRIX& m = m_lastReadback;
+        const bool flatUI = std::fabs(m._33) < 0.5f && std::fabs(m._44 - 1.0f) < 0.01f;
+        m_uploadedThisPair = false;
+        if (!flatUI)
+        {
+            D3DMATRIX headView = ApplyHeadDelta(m);
+            D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
+            device->SetVertexShaderConstantF(cfg.vsViewRegister,
+                                             reinterpret_cast<const float*>(&eyeView), 4);
+            m_uploadedThisPair = true;
+        }
     }
 }
 
@@ -519,6 +543,13 @@ void StereoRenderer::RestoreGameState(IDirect3DDevice9* device)
     for (const auto& bind : m_shadowBinds)
         device->SetTexture(bind.first, bind.second->gameTex ? bind.second->gameTex
                                                             : bind.second->eyeTex[0]);
+    if (m_uploadedThisPair && Config::Get().viewSource == 1)
+    {
+        // Put the game's own register back exactly as we found it.
+        device->SetVertexShaderConstantF(Config::Get().vsViewRegister,
+                                         reinterpret_cast<const float*>(&m_lastReadback), 4);
+        m_uploadedThisPair = false;
+    }
     if (m_hasView && Config::Get().viewSource == 0)
         device->SetTransform(D3DTS_VIEW, &m_baseView);
     if (m_hasProj && Config::Get().asymmetricProjection && Config::Get().viewSource == 0)

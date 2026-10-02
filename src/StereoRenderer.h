@@ -164,6 +164,14 @@ private:
     int        m_loggedViews = 0;    // M0 debugging: log first N view matrices
     unsigned   m_viewCaptures = 0;   // total view captures (periodic logging)
     int        m_loggedEyes  = 0;    // TEMP DIAG: log first 40 per-eye uploads
+    int        m_loggedRB    = 0;    // TEMP DIAG: log first 200 register readbacks
+
+    // Shader-path register handling: the game's c0 as read back at the start
+    // of the current eye pair, whether it was restored yet, and whether our
+    // eye-shifted upload is currently on the device.
+    D3DMATRIX  m_lastReadback    = {};
+    bool       m_readbackValid   = false;
+    bool       m_uploadedThisPair = false;
 
     // Menu-lock detection (M4): last time the captured view actually changed.
     unsigned long long m_lastViewChangeTick = 0;
