@@ -55,9 +55,24 @@ namespace Parse
     }
 
     // "x , y , z" -> true and fills out[3]; false if not three floats.
+    // strtof-based: sscanf is C4996-deprecated under MSVC (fatal with
+    // TreatWarningAsError) and sscanf_s doesn't exist on host test builds.
     inline bool Vec3(const char* s, float* out)
     {
         if (!s || !*s) return false;
-        return sscanf(s, "%f , %f , %f", &out[0], &out[1], &out[2]) == 3;
+        for (int i = 0; i < 3; ++i)
+        {
+            char* end = nullptr;
+            out[i] = strtof(s, &end);
+            if (end == s) return false; // no float here
+            s = end;
+            if (i < 2)
+            {
+                while (*s == ' ') ++s;
+                if (*s != ',') return false;
+                ++s;
+            }
+        }
+        return true;
     }
 }
