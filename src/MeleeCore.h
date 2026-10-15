@@ -105,7 +105,11 @@ namespace Melee
         *dx = cx; *dy = cy;
     }
 
-    // Initial direction delta injected with the attack press (px).
+    // Initial direction delta injected with the attack press (px). This is
+    // Warband's direction-COMMIT distance, deliberately NOT covered by the
+    // SteerDelta clamp: the clamp bounds continuous steering per poll, while
+    // this fixed 80 px nudge is what makes the engine pick the intended
+    // attack direction at press time.
     inline void BeginDelta(AttackDir dir, int* dx, int* dy)
     {
         *dx = 0; *dy = 0;

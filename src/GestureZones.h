@@ -6,8 +6,9 @@
 // unit-tested headless. No Windows/D3D9/XR headers.
 //
 // App-space axes: +X right, +Y up, -Z forward (so +dz means BEHIND the
-// head plane). Distances tuned for an average body; adjustable by gesture
-// tuning rather than rebuild.
+// head plane). Distances are hardcoded for an average body: tuning means
+// editing these constants and rebuilding (per-controller calibration is a
+// manual-checklist item, not yet an ini surface).
 
 #include <cmath>
 

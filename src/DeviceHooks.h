@@ -69,3 +69,16 @@ private:
 
     bool m_curIsRHW = false;
 };
+
+// RAII for the m_internal reentrancy guard. Every detour passes through when
+// the flag is set, so OUR internal D3D calls must run inside one of these
+// scopes. This replaces the previous manual set/clear pairs: a missed reset
+// on any early-return path would silently disable all interception (no
+// error - just a stock-looking frame). Destructor guarantees the reset.
+struct InternalScope
+{
+    InternalScope()  { DeviceHooks::Get().m_internal = true; }
+    ~InternalScope() { DeviceHooks::Get().m_internal = false; }
+    InternalScope(const InternalScope&) = delete;
+    InternalScope& operator=(const InternalScope&) = delete;
+};

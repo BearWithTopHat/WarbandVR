@@ -27,21 +27,18 @@ namespace
         dev->GetRenderTarget(0, &savedRT);
         dev->GetDepthStencilSurface(&savedDS);
 
-        DeviceHooks::Get().m_internal = true;
-        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0));
-        DeviceHooks::Get().m_internal = false;
-        HRESULT hrL = draw();
+        HRESULT hrL, hrR;
+        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0)); }
+        hrL = draw();
+        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1)); }
+        hrR = draw();
 
-        DeviceHooks::Get().m_internal = true;
-        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1));
-        DeviceHooks::Get().m_internal = false;
-        HRESULT hrR = draw();
-
-        DeviceHooks::Get().m_internal = true;
-        dev->SetRenderTarget(0, savedRT);
-        dev->SetDepthStencilSurface(savedDS);
-        StereoRenderer::Get().RestoreGameState(dev);
-        DeviceHooks::Get().m_internal = false;
+        {
+            InternalScope g;
+            dev->SetRenderTarget(0, savedRT);
+            dev->SetDepthStencilSurface(savedDS);
+            StereoRenderer::Get().RestoreGameState(dev);
+        }
         if (savedRT) savedRT->Release();
         if (savedDS) savedDS->Release();
         return FAILED(hrL) ? hrL : hrR;
@@ -96,21 +93,18 @@ namespace
         dev->GetRenderTarget(0, &savedRT);
         dev->GetDepthStencilSurface(&savedDS);
 
-        DeviceHooks::Get().m_internal = true;
-        StereoRenderer::Get().ApplyEye(dev, 0);
-        DeviceHooks::Get().m_internal = false;
-        HRESULT hrL = draw();
+        HRESULT hrL, hrR;
+        { InternalScope g; StereoRenderer::Get().ApplyEye(dev, 0); }
+        hrL = draw();
+        { InternalScope g; StereoRenderer::Get().ApplyEye(dev, 1); }
+        hrR = draw();
 
-        DeviceHooks::Get().m_internal = true;
-        StereoRenderer::Get().ApplyEye(dev, 1);
-        DeviceHooks::Get().m_internal = false;
-        HRESULT hrR = draw();
-
-        DeviceHooks::Get().m_internal = true;
-        dev->SetRenderTarget(0, savedRT);
-        dev->SetDepthStencilSurface(savedDS);
-        StereoRenderer::Get().RestoreGameState(dev);
-        DeviceHooks::Get().m_internal = false;
+        {
+            InternalScope g;
+            dev->SetRenderTarget(0, savedRT);
+            dev->SetDepthStencilSurface(savedDS);
+            StereoRenderer::Get().RestoreGameState(dev);
+        }
         if (savedRT) savedRT->Release();
         if (savedDS) savedDS->Release();
 
@@ -170,9 +164,8 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d,
     if (DeviceHooks::Get().m_internal) return dev->Present(s, d, w, r);
     if (StereoOn())
     {
-        DeviceHooks::Get().m_internal = true;
+        InternalScope g;
         StereoRenderer::Get().OnPresent(dev);
-        DeviceHooks::Get().m_internal = false;
     }
     return dev->Present(s, d, w, r);
 }
@@ -218,9 +211,8 @@ HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
     HRESULT hr = dev->BeginScene();
     if (SUCCEEDED(hr))
     {
-        DeviceHooks::Get().m_internal = true;
+        InternalScope g;
         StereoRenderer::Get().OnBeginScene(dev);  // prepare per-eye targets
-        DeviceHooks::Get().m_internal = false;
     }
     return hr;
 }
@@ -231,9 +223,10 @@ HRESULT __stdcall hkEndScene(IDirect3DDevice9* dev)
     Capture::Trace("EndScene");
     Capture::EndFrame();
     CameraScan::OnFrame();
-    DeviceHooks::Get().m_internal = true;
-    StereoRenderer::Get().OnEndScene(dev); // may draw the comfort overlay per eye
-    DeviceHooks::Get().m_internal = false;
+    {
+        InternalScope g;
+        StereoRenderer::Get().OnEndScene(dev); // may draw the comfort overlay per eye
+    }
     return dev->EndScene();
 }
 
@@ -249,10 +242,8 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
     // the one exception: their per-eye targets need per-eye clears.)
     if (StereoRenderer::Get().ShadowActive())
     {
-        DeviceHooks::Get().m_internal = true;
-        HRESULT hr = StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
-        DeviceHooks::Get().m_internal = false;
-        return hr;
+        InternalScope g;
+        return StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
     }
     return dev->Clear(count, rects, flags, color, z, stencil);
 }
