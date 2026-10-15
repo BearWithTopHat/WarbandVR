@@ -1,3 +1,5 @@
+Wholly untested. I told an agent to do work while I'm on vacation, nowhere near a PC or headset to test. Will test and update with fixes next week - 10/26>
+
 # WarbandVR
 
 An open-source, single-player VR mod for **Mount & Blade: Warband** (2010),
