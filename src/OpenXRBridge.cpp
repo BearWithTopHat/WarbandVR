@@ -18,13 +18,19 @@
 // Real implementation (M3). Game-thread-coupled frame loop; see header.
 // ============================================================================
 
+// d3d11.h/dxgi.h MUST precede the OpenXR headers: the Khronos
+// openxr_platform.h includes nothing itself and references ID3D11Device,
+// ID3D11Texture2D, and D3D_FEATURE_LEVEL in the D3D11 binding structs.
+// (Our zig test shim forward-declared those types, which hid this ordering
+// requirement from every headless gate - the first real MSVC OpenXR build
+// failed here.)
+#include <d3d11.h>
+#include <dxgi.h>
+
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-
-#include <d3d11.h>
-#include <dxgi.h>
 
 #include <cstring>
 #include <cmath>
