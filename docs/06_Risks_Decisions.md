@@ -1,7 +1,10 @@
 # 06 — Risks, decisions, and session log
 
 Append-only. Decisions are dated; if a decision is reversed, add a new entry
-— don't edit history.
+— don't edit history. The **decision log and session log are historical**:
+entries describing the old double-width target, vtable hooks, or unimplemented
+skeletons are evidence of what changed, not current architecture. The living
+risk register below is kept current.
 
 ## Risk register (living)
 
@@ -11,10 +14,11 @@ Append-only. Decisions are dated; if a decision is reversed, add a new entry
 | R2 | Engine re-points RT0 mid-frame (shadows/reflections) breaking per-eye duplication | Medium | Visual glitches | M2-1: shadow-surface chain per eye | Open |
 | R3 | CPU-bound battles + doubled draw calls miss 72 fps on host PC | Medium | Comfort | Battle-size guidance; overhead budget <4 ms enforced in M2 | Open |
 | R4 | Engine camera struct never found reliably (M0-C fails) | Low-Med | M4 degraded | Stay on matrix-delta tracking (VorpX-style) permanently | Open |
-| R5 | D3D9→OpenXR copy path too slow | Low | Latency | D3D9Ex shared-surface path (planned in M3-1); SBS→Steam Link fallback | Open |
+| R5 | D3D9→OpenXR copy path too slow | Low | Latency | D3D9Ex shared-surface fast path implemented (`[OpenXR] SharedSurface=1`, Ex steering); CPU-copy slow path and SBS→Steam Link as fallbacks. Throughput unmeasured on hardware | Open |
 | R6 | Game update breaks offsets/hook assumptions | Low | Sudden crash | Version-gate writes (`[Camera] GameBuild`); EnableStereo=0 always safe | Open |
 | R7 | Motion melee injection misread by engine (attack direction stochastic) | Medium | M5 quality | M0-C input-state RE; extensive tunables; keep flat scheme as config option | Open |
-| R8 | Scope creep into multiplayer/native-Frame | — | Project death | Explicit non-goals in design doc §9; AGENTS.md invariant 6 | Controlled |
+| R8 | Scope creep into multiplayer | — | Project death | Explicit non-goals in design doc; AGENTS.md invariant 6. Native Steam Frame is now a Phase-2 package sharing this source tree (not scope creep), but its runtime is unverified | Controlled |
+| R9 | Draw duplication misses frame budget in large battles (R3 realized) | Medium | Comfort | Depth-reprojection fallback (BannerlordVR lesson, docs/15): render one eye, rebuild the other from the Z-prepass depth at composite time. Design only; implement only if R3 measures bad on hardware | Open |
 
 ## Decision log
 
@@ -285,3 +289,134 @@ game baking dialog layout from device state that differs mid-frame. Diag
 build in the tree logs each pair's actual register + live viewport vs
 `m_gameVp` (`RB cap=...` lines); next step is key-triggered logging/dump so
 the capture lands exactly on the dialog.
+
+### 2026-10-02 (iteration M3–M5) — Game-thread-coupled OpenXR submission
+The frame loop is driven synchronously from `SubmitFrame` (called by
+`StereoRenderer::OnPresent`): xrWaitFrame paces the game to the HMD refresh.
+Simplest correct ordering, no cross-thread surface ownership issues. Revisit
+with an async submission thread only if frame pacing stutters on hardware.
+
+### 2026-10-02 — Per-eye swapchains sized to eye surfaces (not the runtime's
+recommended view size). The eye surfaces are the game's backbuffer size;
+the projection layer's per-eye FOV/pose come from xrLocateViews. If the
+runtime upscales noticeably, add a scale factor config later.
+
+### 2026-10-02 — D3D9Ex steering is opt-in (`SharedSurface=1`)
+Steering `Direct3DCreate9` → Ex changes device semantics slightly (the game
+gets an Ex device). Verified-safe pattern used by other wrappers, but the
+slow CPU-copy path is the default precisely so bring-up starts from the most
+compatible configuration.
+
+### 2026-10-02 — Motion injection via SendInput, not engine memory writes
+M5 uses mouse-direction + click injection (Warband's documented attack-input
+behavior). No engine memory patching required; works regardless of build
+offsets. Engine-input-struct injection remains a possible M5+ refinement if
+SendInput proves lossy (direction quantization).
+
+## Session log
+
+- **2026-10-02 (M3–M5 autonomous pass)** — Implemented the complete OpenXR
+  bridge (session, swapchains, frame loop, slow + fast submit paths, pose
+  sampling with OneEuro + recenter), the M4 wiring end of it, and the full
+  MotionInput module (action bindings for 5 controller profiles, kb/mouse
+  emulation with remappable keys, swing classifier + attack/block injection,
+  latency instrumentation). Added `Release-OpenXR|Win32` build config,
+  `[Output] SharedSurface`, `[Tracking] Invert*`, `[Input]`/`[InputMap]`
+  config sections. Everything off by default; stock boot invariant intact.
+  Remaining work is headset bring-up and feel tuning — needs the hardware.
+
+### 2026-10-02 (review pass) — Held-attack steering (MotionSteer)
+Warband natively steers a HELD attack from mouse movement. So instead of
+injecting an instant click per swing, attacks now inject direction + LMB
+down, keep the button held, and stream per-frame mouse deltas from live
+hand velocity (rotated into head-yaw space) until the hand slows or
+SteerMaxHoldMs elapses. This is the closest approximation to "the weapon
+follows the hand" available without engine animation internals (closed
+source; M0-C unfinished). True per-frame weapon-pose control would require
+reverse engineering Warband's animation/agent state - out of scope; the
+held-steer path rides a documented, robust engine behavior.
+
+### 2026-10-02 (review pass) — MotionInput subaction model fix
+The first draft created per-hand actions WITHOUT subaction paths but then
+created action spaces and suggested bindings WITH /user/hand/* paths -
+illegal per the OpenXR spec (XR_ERROR_PATH_INVALID). Reworked to the
+standard model: one action per control with both hand subactions; reads and
+spaces specify the subaction path.
+
+### 2026-10-02 (review pass) — Monitor mirror fallback
+With OutputMode=1 and no running XR session (no runtime, headset off,
+session not begun), the backbuffer composite still runs, so the desktop
+window stays live and the game remains playable flat. While the session
+runs, the desktop window is intentionally not composited (perf).
+
+- **2026-10-02 (review/quality pass)** — Full self-review + cross-compile
+  verification (clang via zig, x86-windows-gnu, both plain and
+  WBVR_WITH_OPENXR flavors; OpenXR headers via a spec-faithful harness
+  subset). One real code bug found by the compiler
+  (`xrGetActionStateVector2F` capitalization) plus harness-only noise.
+  Fixed: hr scoping compile error in CreateResources shared
+  path; eye-DS leak on shared->plain fallback; stub SubmitFrame log spam;
+  unchecked swapchain acquire/wait; per-frame GetDesc in the slow copy;
+  hardcoded blend mode (now enumerated, OPAQUE preferred); upward-dominant
+  swings no longer inject overhead; attacks are now held + steered; instant-
+  click injection replaced by deferred release. Added docs/07 (AI
+  onboarding) and docs/08 (controls & setup).
+
+- **2026-10-02 (final hardening pass)** — Preemptive fixes: bridge Shutdown
+  now runs on DLL_PROCESS_DETACH (previously: leaked XR session and possible
+  stuck emulated keys on exit); init failure retries every 5 s instead of
+  permanently giving up (runtime may start after the game); eye-surface size
+  changes (resolution switch / Reset) rebuild swapchains instead of risking
+  OOB copies; projection layer suppressed when pose locate fails; MotionInput
+  retries Init while the session runs; per-eye Flush on the cross-API fast
+  path. Everything not code-fixable is catalogued with testing paths in
+  docs/09 (game, mod, Steam/streaming, Steam Frame Phase 2 feasibility).
+  Re-cross-compiled clean in both flavors after all changes.
+
+- **2026-10-02 (VR combat gestures)** — Tier-3 weapon handling: grab-zone
+  gestures (hip L/R, over-shoulder, quiver) and two-handed stance emit
+  synthetic keys (F1–F5 defaults) that a companion module-system mod turns
+  into real equipment changes - the one clean channel into the closed
+  engine (DLL senses, game acts). Bow draw = trigger hold/release. Zone
+  grabs suppress grip-block for that press. Design + companion script
+  skeleton in docs/10. Bridge now also exposes absolute head position for
+  body-relative zones. Compiled clean both flavors.
+
+- **2026-10-03 (h2-mod-vr pattern adoption)** — Reviewed Aeka0/h2-mod-vr
+  (docs/11). Their tier-5 fidelity comes from a reconstructed engine client,
+  which Warband lacks - not transferable. Adopted what IS transferable:
+  snap turning (reference-pose rotation, pivot re-anchored to head XZ),
+  holster-on-grip-release in a zone (F6; press=grab / release=stow grammar),
+  spectator mirror (MirrorOnDesktop). Their setup-order and per-weapon-
+  procedure guidance folded into docs/08 and docs/10. Compiled clean both
+  flavors.
+
+- **2026-10-06 (diablo2-vr-port review)** — Analysis in docs/12. Their
+  "VSync off - important" lesson adopted as code: ForceNoVsync=1 (default)
+  makes the proxy force D3DPRESENT_INTERVAL_IMMEDIATE in CreateDevice and
+  Reset when OutputMode=1, so driver vsync cannot fight xrWaitFrame pacing.
+  Their version-resilient scanning validates CameraScan's direction; their
+  per-weapon calibration reality is folded into docs/10's tuning path;
+  their BodyWalk/FlatVR commercial dependency chain is a cautionary
+  contrast for Phase 2 (ours has no such dependency).
+
+- **2026-10-07 (streaming-scope reassessment + cinema mode)** — If the
+  project stays pure-PCVR-streaming, the D2R-VR commercial chain becomes a
+  documented plan-B and ViGEmBus analog input a documented upgrade path
+  (docs/12 addendum). Implemented their diorama idea natively instead:
+  [Output] CinemaMode=1 submits a fixed quad layer 2.2m ahead of the
+  recenter reference. Full tree recompiled clean, both flavors.
+
+- **2026-10-07 (sanity audit)** — Full recompile with -Wall -Wextra (clean,
+  both flavors) plus a scripted consistency battery: config field/parse/usage
+  cross-check, ini<->parser key parity, bridge decl/def parity in both build
+  branches. Fixes: dead config fields removed (swapEyeViewports, bothEyesLeft,
+  vsMatrixIsViewProj - silently-dead knobs are traps; VSMatrixIsViewProj may
+  return WITH the shader bring-up if the register proves to hold view*proj);
+  dead m_loggedEyes diag field removed; DumpFrames/NoZTest added to the ini
+  for discoverability; REAL LOGIC BUG fixed - LMB had two owners (bow-draw
+  trigger hold and the swing classifier), so a swing during a held draw
+  released the bow early: swings are now suppressed while the trigger holds
+  LMB and vice versa. Reviewed the draw-duplication gates
+  (DivertedTextureBound / CurrentRTIsMain / SBSMonoUI) - coherent with the
+  per-eye surface architecture, no leftover half-screen-fix scaffolding.

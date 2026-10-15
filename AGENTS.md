@@ -35,7 +35,8 @@ do not change it).
 Requirements: Visual Studio 2022 (v143 toolset), Windows 10 SDK. No external
 dependencies in the default build. The optional OpenXR path needs
 `-D WBVR_WITH_OPENXR` (add to preprocessor definitions), the OpenXR SDK, and
-`openxr_loader.lib` — only touch that configuration for milestone M3.
+`openxr_loader.lib`. The `Release-OpenXR|Win32` solution configuration already
+carries these; the CI workflow builds the x86 loader from a pinned SDK tag.
 
 ## Deploy & test loop
 
@@ -86,3 +87,12 @@ game, the log is clean, and invariant 1 still holds. "Compiles" is not done.
 - Log significant decisions in `docs/06_Risks_Decisions.md` (append-only).
 - Commit early and often; commit messages start with the milestone tag
   (`[M1]`, `[M2]`, ...).
+
+## Tests
+
+Headless unit tests for the pure logic units live in `tests/` (see
+`docs/07_AI_Onboarding.md` section 8). After any change to `src/Mat4.h`,
+`src/DupGate.h`, `src/MeleeCore.h`, `src/GestureZones.h`, `src/ParseUtil.h`,
+`src/Comfort.h`, `src/OneEuroFilter.h`, `src/MathUtil.h`,
+or the duplication/swing/gesture logic that uses them: run the suite and
+`tools/check_parity.py`, and update tests to match intended behavior.

@@ -9,6 +9,10 @@
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Release-OpenXR|Win32">
+      <Configuration>Release-OpenXR</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -31,6 +35,13 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-OpenXR|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -42,6 +53,9 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release-OpenXR|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
@@ -51,6 +65,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>d3d9</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-OpenXR|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <TargetName>d3d9</TargetName>
+    <!-- Deploy to a distinct folder so the plain and OpenXR builds coexist -->
+    <OutDir>$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -88,6 +108,30 @@
       <AdditionalDependencies>d3d9.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release-OpenXR|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;WARBANDVR_EXPORTS;_WINDOWS;_USRDLL;WBVR_WITH_OPENXR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <!-- OpenXR SDK: set the OPENXR_SDK env var to its root (with include/ and lib/)
+           or unpack it into external\openxr. Win32 binaries required. -->
+      <AdditionalIncludeDirectories>$(OPENXR_SDK)\include;$(ProjectDir)external\openxr\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ModuleDefinitionFile>WarbandVR.def</ModuleDefinitionFile>
+      <AdditionalDependencies>d3d9.lib;dxguid.lib;openxr_loader.lib;d3d11.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OPENXR_SDK)\lib;$(ProjectDir)external\openxr\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\Logger.cpp" />
@@ -100,6 +144,7 @@
     <ClCompile Include="src\Capture.cpp" />
     <ClCompile Include="src\CameraScan.cpp" />
     <ClCompile Include="src\OpenXRBridge.cpp" />
+    <ClCompile Include="src\MotionInput.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Logger.h" />
@@ -109,11 +154,19 @@
     <ClInclude Include="src\D3D9ExProxy.h" />
     <ClInclude Include="src\DeviceHooks.h" />
     <ClInclude Include="src\StereoRenderer.h" />
+    <ClInclude Include="src\Mat4.h" />
     <ClInclude Include="src\MathUtil.h" />
+    <ClInclude Include="src\DupGate.h" />
+    <ClInclude Include="src\MeleeCore.h" />
+    <ClInclude Include="src\GestureZones.h" />
+    <ClInclude Include="src\InputSink.h" />
+    <ClInclude Include="src\ParseUtil.h" />
     <ClInclude Include="src\Capture.h" />
     <ClInclude Include="src\CameraScan.h" />
     <ClInclude Include="src\OneEuroFilter.h" />
+    <ClInclude Include="src\Comfort.h" />
     <ClInclude Include="src\OpenXRBridge.h" />
+    <ClInclude Include="src\MotionInput.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="WarbandVR.def" />

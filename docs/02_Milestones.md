@@ -4,8 +4,9 @@ North-star goal: **play Warband's single-player campaign in VR on the Steam
 Frame, streamed from the user's PC, with tracked head and motion-controlled
 melee** — with every intermediate milestone independently playable.
 
-Milestones are sequential; each has a deliverable, acceptance criteria, and
-the task briefs that implement it (in `docs/03_Agent_Prompts.md`).
+Milestones are sequential; each has a deliverable and acceptance criteria.
+`docs/03_Agent_Prompts.md` is retained as the historical task-brief record;
+the checkboxes below are the current status source of truth.
 
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
@@ -58,50 +59,71 @@ passes, scissor, and verification
 - [ ] 150-agent battle holds 72 fps on target PC
 
 ## M3 — OpenXR output to the Steam Frame
-**Effort:** 2–4 weeks · needs OpenXR SDK
+**Status: code complete and headless/compile-gated; pending headset bring-up**
 
-Deliverable: `OutputMode=1` renders into an OpenXR session; game is visible
-in the headset via SteamVR → Steam Link, still with mouse/keyboard or the
-existing controller scheme.
+Implemented: full OpenXRBridge (instance/session/LOCAL space/per-eye
+swapchains/game-thread-coupled frame loop), slow CPU-copy submit path,
+D3D9Ex shared-surface fast path (`[Output] SharedSurface=1`, incl. Ex device
+steering in dllmain), `Release-OpenXR|Win32` build configuration. What
+remains is on-hardware bring-up.
 
-- [ ] `WBVR_WITH_OPENXR` build configuration works
-- [ ] OpenXRBridge implemented (instance/session/swapchains/frame loop)
-- [ ] Stereo surface reaches swapchain images (slow copy path first)
-- [ ] Streamed to Steam Frame; stable 30-minute session
-- [ ] (Stretch) D3D9Ex shared-surface zero-copy path — **the Ex wrapper is
-      already implemented**, so this is "use it in CreateResources", not a
-      new subsystem
+- [~] `Release-OpenXR|Win32` builds against the OpenXR SDK: GitHub Actions job configured with a pinned x86 SDK loader build; remote CI execution remains pending
+- [ ] `OutputMode=1` shows the game in the headset via SteamVR → Steam Link
+- [ ] Correct eye assignment; stable 30-minute session
+- [ ] Fast path (`SharedSurface=1`) after slow path works
+- [ ] (Post-M3) async submission thread — the synchronous loop locks the game
+      to HMD refresh; fine for bring-up, revisit if frame pacing stutters
 
 ## M4 — Head tracking
-**Effort:** 1–2 weeks · pipeline is implemented; needs the M3 pose source
-plus on-head tuning
+**Status: code complete 2026-10-02, pending on-head verification**
 
-Already implemented: pose-delta composition onto the captured view
-(`ApplyHeadDelta`), menu lock, recenter hotkey plumbing, OneEuro filter.
-Remaining:
-- [ ] `OpenXRBridge::GetHeadPoseDelta` implemented (xrLocateViews at
-      predicted display time, relative to recenter reference)
-- [ ] Pose sampled once per frame (in OnBeginScene), filters wired
-- [ ] `HeadTracking=1` verified: 1:1 look-around, no judder at 72 fps
+Implemented: `xrLocateViews` pose sampling at predicted display time,
+recenter reference + hotkey (wired to the real bridge now), OneEuro
+smoothing, menu lock, pose-delta composition onto the captured view, and
+`[Tracking] Invert*` sign-convention tunables so handedness mismatches are
+fixable from the ini without a rebuild. Remaining:
+- [ ] `HeadTracking=1` verified: 1:1 look-around, no judder
+- [ ] Sign conventions confirmed/flipped via the Invert* keys
 - [ ] (Stretch, needs M0-C camera struct) engine-camera write path
 - [ ] Comfort pass: horseback, sieges, menus
 
 ## M5 — Motion-controlled melee
-**Effort:** 1–3 months · the design-heavy milestone; see design doc §6
+**Status: code complete and fake-OpenXR regression-tested; pending playtesting & tuning**
 
-- [ ] Controllers emulate the existing working controller scheme (menus, map,
-      movement) — regression-tested
-- [ ] Swing capture: velocity/direction classification into Warband's 4
-      attack directions
-- [ ] Directional block from controller orientation
-- [ ] Shield, archery (two-hand aim), and couched-lance handling
-- [ ] Input latency measured: swing → attack start <50 ms
+Implemented (`src/MotionInput.cpp`): OpenXR action set + suggested bindings
+for Touch/Index/Vive/WMR/simple profiles; controller→kb/mouse emulation with
+`[InputMap]` remappable keys; swing classifier (ring buffer, peak-velocity
+dominant-axis classification into left/right/overhead/thrust) with
+mouse-direction + held-attack injection; grip-hold block; MotionSteer held
+swing steering with per-poll delta clamp; snap turn; grab-zone virtual-slot
+gestures with post-grab swing refractory; bow-trigger LMB ownership;
+stick-click-hold recenter chord; runtime-timestamped hold timing for block,
+both-grips, and recenter (OpenXR `lastChangeTime`, with analog fallback);
+controller presets (`[Preset.*]` overrides);
+shutdown release of held inputs; swing→inject latency instrumentation. The
+companion module implements gesture equipment switching, optional melee
+direction assist, and the either-order crossbow reload ritual.
+
+Remaining:
+- [ ] Emulation mode regression-tested on hardware (menus, map, movement)
+- [ ] Classifier accuracy on the 50-swing test set (<10% misclassification)
+- [ ] Directional block from controller orientation (currently grip hold only)
+- [ ] MotionSteer tuning on real swings (SteerScale, SteerMaxHoldMs)
+- [ ] Shield, archery (two-hand aim), couched-lance handling
+- [ ] Companion module verified in-game on a single-player module
+- [ ] 20-swing trial vs training dummies: >=18 intended-direction hits;
+      swing→attack latency <50 ms
 
 ## M6 — Polish & release
+- [x] Publish-oriented README, FAQ, controls guide, and Native package notes
+- [x] Repeatable package script and PCVR/Native source-parity gate
+- [x] GitHub Actions workflow for headless regression plus MSVC Win32 stub/OpenXR builds (configured; remote run pending)
+- [x] Comfort options: world-scale presets, vignette, snap turn, cinema mode
 - [ ] UI projected on a curved plane at comfortable distance
 - [ ] Per-scene profiles (menu/battle/map/tournament) with auto-switching
 - [ ] Installer + uninstaller, README for users, Nexus/Workshop release
 - [ ] Performance tuning guide (battle size vs fps)
+- [ ] Full hardware checklist completed (`docs/manual_test_checklist.md`)
 
 ---
 

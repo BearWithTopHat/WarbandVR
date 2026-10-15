@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # Captures the primary screen to a PNG (for inspecting game state headlessly).
 param([Parameter(Mandatory = $true)][string] $OutFile)
 Add-Type -AssemblyName System.Drawing

@@ -39,7 +39,11 @@ through both paths simultaneously.
    vertex shader constants at the register your log flagged — the values
    should match. Note whether it's view-only or view·proj (multiply by the
    captured projection and compare).
-4. Record: `VSViewRegister`, `VSMatrixIsViewProj` in the ini.
+4. Record `VSViewRegister` in the ini and note in the results table whether
+   the register appears to hold view-only or view·proj. There is intentionally
+   no separate `VSMatrixIsViewProj` runtime key; the current shader path reads
+   back the register per draw pair and classifies flat UI from the actual
+   matrix values.
 
 ## Part C — Camera struct (needed for M4, not M1)
 

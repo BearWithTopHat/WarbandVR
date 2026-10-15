@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # Clicks absolute virtual-screen coordinates (multi-monitor safe).
 param(
     [Parameter(Mandatory = $true)][int] $X,

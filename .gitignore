@@ -6,3 +6,19 @@ WarbandVR/
 
 # Captured game logs (analysis artifacts, too big for git)
 docs/*log*.txt
+
+# Headless test outputs
+tests/obj/
+tests/run_tests
+tests/run_integration
+tests/run_integration_asan
+tests/run_fuzz
+tests/run_motion_input
+*.pyc
+__pycache__/
+
+# Local OpenXR SDK drop-in
+external/openxr/
+
+# Generated at package time (manifest/provenance per build)
+BUILD-INFO.json

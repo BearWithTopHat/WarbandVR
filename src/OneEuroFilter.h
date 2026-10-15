@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
 // OneEuroFilter: jitter-killing low-pass for noisy signals at fixed rate,
@@ -23,7 +24,8 @@ public:
         if (dt <= 0.0) dt = 1.0 / m_freq;
 
         double dx = m_hasLast ? (x - m_xPrev) / dt : 0.0;
-        double edx = Alpha(m_dCutoff, dt) * dx + (1.0 - Alpha(m_dCutoff, dt)) * m_dxPrev;
+        const double aDeriv = Alpha(m_dCutoff, dt);
+        double edx = aDeriv * dx + (1.0 - aDeriv) * m_dxPrev;
         double cutoff = m_minCutoff + m_beta * std::fabs(edx);
         double a = Alpha(cutoff, dt);
         float result = static_cast<float>(a * x + (1.0 - a) * (m_hasLast ? m_xPrev : x));

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
 // StereoRenderer: owns the per-eye render targets and all per-eye state math.
@@ -71,8 +72,6 @@ public:
     // Matrix capture (fed by the SetTransform / VS-constant hooks)
     void CaptureViewMatrix(const D3DMATRIX& m);
     void CaptureProjectionMatrix(const D3DMATRIX& m);
-    const D3DMATRIX& BaseView() const { return m_baseView; }
-    bool HasView() const { return m_hasView; }
 
     // Game viewport tracking (fed by hkSetViewport when not internal)
     void SetGameViewport(const D3DVIEWPORT9& vp);
@@ -87,6 +86,11 @@ public:
 
     // The eye surfaces (M3 reads these; index 0 = left, 1 = right).
     IDirect3DSurface9* EyeSurface(int eye) const { return (eye >= 0 && eye < 2) ? m_eyeSurf[eye] : nullptr; }
+    UINT EyeWidth() const { return m_eyeW; }
+    UINT EyeHeight() const { return m_eyeH; }
+    // D3D9Ex shared handle for the eye texture (M3 fast path; null unless
+    // [Output] SharedSurface=1 AND the device is Ex).
+    HANDLE EyeSharedHandle(int eye) const { return (eye >= 0 && eye < 2) ? m_eyeShared[eye] : nullptr; }
 
     // --- Offscreen shadow passes (M2, Config::offscreenPasses) -------------
     // When the game re-points RT0 at its own surface S mid-frame, we
@@ -103,6 +107,9 @@ public:
     };
     SurfaceShadow* FindShadow(IDirect3DSurface9* gameSurf);
     SurfaceShadow* BeginShadowPass(IDirect3DDevice9* device, IDirect3DSurface9* gameSurf);
+    // Activate/deactivate per-eye substitution for a game offscreen RT.
+    // Returns true when `gameSurf` is now represented by per-eye copies.
+    bool ActivateShadowPass(IDirect3DDevice9* device, IDirect3DSurface9* gameSurf);
     void EndShadowPass();
     void ReleaseShadow(SurfaceShadow& s);
     void ReleaseAllShadows();
@@ -115,8 +122,11 @@ private:
     StereoRenderer() = default;
     void CreateResources(IDirect3DDevice9* device);
     void ReleaseResources();
+    void ReleaseEyeTargets(); // per-eye color/depth/shared handles only
     void CompositeToBackbuffer(IDirect3DDevice9* device);
     void ClearEyeTargets(IDirect3DDevice9* device);
+    void RenderComfortVignette(IDirect3DDevice9* device);
+    bool EnsureVignetteTexture(IDirect3DDevice9* device);
 
     // M4: compose head pose delta onto the captured view (identity if
     // tracking disabled, no pose source, or menus are locked).
@@ -128,9 +138,12 @@ private:
     int  m_dumpedFrames = 0;
     unsigned m_presentCount = 0;
 
-    IDirect3DDevice9*  m_device     = nullptr;
     IDirect3DSurface9* m_eyeSurf[2] = { nullptr, nullptr };  // per-eye game-sized RTs
     IDirect3DSurface9* m_eyeDS[2]   = { nullptr, nullptr };  // per-eye game-sized depth
+    IDirect3DTexture9* m_eyeTex[2]  = { nullptr, nullptr };  // backing textures (shared path)
+    HANDLE             m_eyeShared[2] = { nullptr, nullptr }; // D3D9Ex shared handles
+    IDirect3DTexture9* m_vignetteTex  = nullptr;             // generated radial alpha overlay
+    bool               m_vignetteFailed = false;             // do not retry a failed create every frame
     D3DPRESENT_PARAMETERS m_pp      = {};
     D3DFORMAT   m_dsFormat          = D3DFMT_D24S8;
     UINT        m_eyeW              = 0;      // eye target dims (= game backbuffer dims)
@@ -160,18 +173,17 @@ private:
     SurfaceShadow* m_shadowActive = nullptr;
 
     bool       m_active    = false;  // stereo duplication currently in effect
-    bool       m_inScene   = false;
     int        m_loggedViews = 0;    // M0 debugging: log first N view matrices
     unsigned   m_viewCaptures = 0;   // total view captures (periodic logging)
-    int        m_loggedEyes  = 0;    // TEMP DIAG: log first 40 per-eye uploads
-    int        m_loggedRB    = 0;    // TEMP DIAG: log first 200 register readbacks
 
     // Shader-path register handling: the game's c0 as read back at the start
     // of the current eye pair, whether it was restored yet, and whether our
     // eye-shifted upload is currently on the device.
     D3DMATRIX  m_lastReadback    = {};
     bool       m_readbackValid   = false;
+    bool       m_readbackPlausible = true;  // false => wrong register guess; render mono
     bool       m_uploadedThisPair = false;
+    bool       m_loggedImplausible = false; // one-shot warning rate limiter
 
     // Menu-lock detection (M4): last time the captured view actually changed.
     unsigned long long m_lastViewChangeTick = 0;

@@ -1,4 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+
+// clang (zig cross-compile) warns about mingw COM exception specs differing
+// from our overrides; MSVC (the shipping compiler) does not. Clang-only.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmicrosoft-exception-spec"
+#endif
 
 // DeviceProxy: a full delegating wrapper around the real IDirect3DDevice9(Ex).
 //
@@ -170,3 +178,7 @@ public:
     HRESULT __stdcall ResetEx(D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX *pFullscreenDisplayMode) override;
     HRESULT __stdcall GetDisplayModeEx(UINT iSwapChain, D3DDISPLAYMODEEX* pMode, D3DDISPLAYROTATION* pRotation) override;
 };
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif

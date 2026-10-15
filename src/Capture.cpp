@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "Capture.h"
 #include "Config.h"
 #include "Logger.h"

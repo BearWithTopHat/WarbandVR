@@ -1,0 +1,20 @@
+WarbandVR
+=========
+
+Copyright (C) 2026 The WarbandVR contributors.
+Licensed under the GNU General Public License v3.0 (see LICENSE).
+
+WarbandVR is an unofficial, community-made mod and is not affiliated with,
+endorsed by, or sponsored by TaleWorlds Entertainment. "Mount & Blade" and
+"Mount & Blade: Warband" are trademarks of their respective owners.
+
+This project:
+  * contains NO game assets, game code, or TaleWorlds intellectual property
+  * modifies NO game files (it is a runtime DLL proxy; uninstall = delete)
+  * requires a legally owned copy of Mount & Blade: Warband to function
+  * is single-player only, by design
+
+Third-party components used at build time (headers/SDKs, dynamically linked
+system libraries, and - for the optional OpenXR build - the Khronos OpenXR
+loader, Apache-2.0) remain the property of their respective owners and are
+governed by their own licenses.

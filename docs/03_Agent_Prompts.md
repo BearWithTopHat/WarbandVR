@@ -1,8 +1,19 @@
-# 03 — Agent prompts
+# 03 — Agent prompts (historical record)
+
+> **Status note (current audit):** this file is retained as the historical
+> record of task briefs and intermediate designs. Do not treat every prompt
+> below as the current work queue or current architecture. The authoritative
+> references are `README.md`, `AGENTS.md`, `docs/01_Design.md`,
+> `docs/02_Milestones.md`, and `docs/manual_test_checklist.md`.
+>
+> Several briefs describe work that has since landed or was superseded — for
+> example, the old double-width stereo target was replaced by per-eye
+> game-sized surfaces, and early OpenXR/MotionInput skeleton prompts are now
+> implemented. When this file and newer docs disagree, the newer docs win.
 
 Copy-paste task briefs for an autonomous coding agent. Each is self-contained:
-context, exact scope, constraints, and acceptance criteria. Use them in order;
-each assumes the repo invariants in `AGENTS.md`.
+context, exact scope, constraints, and acceptance criteria. They assume the
+repo invariants in `AGENTS.md`.
 
 > **Update 2026-10-01 (second iteration):** the original M0-1, M0-2, and the
 > code halves of M1-1/M2-1/M4-1 are **already implemented in the scaffold**
@@ -41,7 +52,7 @@ Do:
 2. Interpret: "SetTransform: VIEW xNNN" per frame -> ViewSource=0. VIEW x0 ->
    instruct the human to rerun with CaptureMode=2; the log's candidate table
    gives the register -> set ViewSource=1, VSViewRegister=<top candidate>,
-   VSMatrixIsViewProj per whether the matrix looked proj-like.
+   and record whether the matrix looked view-only or view·proj in docs/04.
 3. Cross-check request: one RenderDoc frame capture confirming the register
    (or the fixed-function path).
 4. Record the findings in docs/04 §Results and set WarbandVR.ini defaults.
@@ -149,10 +160,11 @@ boot with EnableStereo=0.
 ```
 Task: Implement OpenXRBridge for real (WBVR_WITH_OPENXR build).
 
-Context: src/OpenXRBridge.cpp has a skeleton with TODOs. Follow the Khronos
-hello_xr D3D11 sample structure. The stereo frame arrives as a D3D9 surface
-(2W x H, left eye = left half). The IDirect3D9Ex wrapper (D3D9ExProxy) is
-already implemented - use it for the shared-surface fast path.
+Historical context: src/OpenXRBridge.cpp began as a skeleton. Follow the
+Khronos hello_xr D3D11 sample structure. The current stereo frame arrives as
+two game-sized D3D9 eye surfaces (not the old 2W x H target). The
+IDirect3D9Ex wrapper (D3D9ExProxy) is implemented for the shared-surface fast
+path.
 
 Do:
 1. Add a second project configuration "Release-OpenXR|Win32" defining
@@ -160,7 +172,7 @@ Do:
    setup in docs/05.
 2. Implement: xrCreateInstance (with XR_KHR_D3D11_enable), D3D11 device
    creation, xrCreateSession (XrGraphicsBindingD3D11KHR), LOCAL reference
-   space, two swapchains sized to half the stereo target, and a frame loop
+   space, two swapchains sized to the per-eye targets, and a frame loop
    on a dedicated thread (xrWaitFrame/BeginFrame/EndFrame with two
    projection layer views).
 3. SubmitFrame: GetRenderTargetData -> staging -> D3D11 texture ->
@@ -242,6 +254,78 @@ Do:
 Acceptance criteria (human): 20-swing melee trial vs training dummies with
 >=18 intended-direction hits; swing->attack latency <50 ms; the flat
 controller scheme still available by config.
+```
+
+---
+
+## 2026-10-02 update: M3/M4/M5 implementation is done — these are bring-up tasks
+
+## M3-2 — OpenXR headset bring-up
+```
+Task: Get OutputMode=1 rendering into the headset.
+
+Context: OpenXRBridge.cpp is fully implemented (session, per-eye swapchains,
+game-thread-coupled frame loop, slow CPU-copy submit, optional D3D9Ex shared
+fast path). Build config Release-OpenXR|Win32; SDK setup in docs/05.
+
+Do:
+1. Build Release-OpenXR|Win32 with the OpenXR SDK present. Status: all TUs
+   were cross-compiled clean (clang, both build flavors, 2026-10-02) against
+   a spec-faithful header subset, so MSVC issues should be few - mostly SDK
+   differences or MSVC-strictness nits, not structural bugs.
+2. Deploy with OutputMode=1. SteamVR as active runtime. First success
+   criterion: log shows "OpenXRBridge: session running" and a frame in the
+   HMD - even sideways/wrong.
+3. Verify eye assignment (human closes each eye). Verify swapchain vs eye
+   surface sizing. Then stability: 30-minute session.
+4. Only then try SharedSurface=1 (Ex steering + GPU copy). Log which path
+   engaged; keep whichever is stable.
+
+Acceptance criteria: stable stereo image in the headset streamed to the
+Frame; fallback to SBS with a clean log line when no runtime is present;
+EnableStereo=0 stock boot unaffected (prime invariant).
+```
+
+## M4-2 — Head tracking bring-up
+```
+Task: Enable HeadTracking=1 and tune on-head.
+
+Context: pose sampling (xrLocateViews at predicted display time), smoothing,
+menu lock, recenter hotkey are implemented. Sign conventions are tunable via
+[Tracking] InvertYaw/Pitch/Roll/PosX/PosZ WITHOUT a rebuild.
+
+Do:
+1. Human runs: look left/right, up/down, lean. Report what the view does.
+2. Map reported inversions onto the Invert* keys (e.g. "looking left rotates
+   the world left" -> InvertYaw=1).
+3. Tune SmoothingMinCutoff/SmoothingBeta against judder vs lag.
+4. Verify menu lock: menus stay fixed while looking around.
+
+Acceptance criteria (human): 1:1 look-around, no judder, menus steady,
+recenter works, 10-minute drift check.
+```
+
+## M5-3 — Motion melee tuning
+```
+Task: Playtest the implemented motion input and tune.
+
+Context: MotionInput.cpp implements emulation (default on) and melee
+injection (MotionMelee=1): swing classifier, attack injection, grip block,
+latency logging. Warband picks attack direction from mouse movement at
+press time; we inject direction + click via SendInput.
+
+Do:
+1. Emulation first (MotionMelee=0): confirm menus/map/movement/camera are
+   fully playable; adjust [InputMap] to taste.
+2. MotionMelee=1: human performs the 50-swing test set (log shows each
+   classification); fix systematic misclassifications by adjusting
+   SwingThreshold and the axis-mapping, or by rotating swing vectors into
+   head space if world-vs-head confusion shows up.
+3. Tune AttackCooldownMs and BlockHoldTime for feel.
+4. Verify [MELEE] inject latency stays <50 ms end-to-end.
+
+Acceptance criteria (human): >=18/20 intended-direction hits on training
+dummies; flat controller scheme still available by config.
 ```
 
 ---

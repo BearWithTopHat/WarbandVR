@@ -1,4 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+
+// clang (zig cross-compile) warns about mingw COM exception specs differing
+// from our overrides; MSVC (the shipping compiler) does not. Clang-only.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmicrosoft-exception-spec"
+#endif
 
 // D3D9ExProxy: delegating wrapper around the real IDirect3D9Ex.
 //
@@ -48,3 +56,7 @@ private:
     IDirect3D9Ex* m_real;
     std::atomic<ULONG> m_refCount;
 };
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif

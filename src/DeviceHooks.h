@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
 // DeviceHooks: stereo interception logic, invoked from DeviceProxy's
@@ -39,6 +40,12 @@ HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9*, D3DPRIMITIVETYPE, 
 HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9*, UINT, const float*, UINT);
 HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9*, UINT, const float*, const D3DRECTPATCH_INFO*);
 
+// Force D3DPRESENT_INTERVAL_IMMEDIATE when OpenXR output is configured:
+// xrWaitFrame owns the pacing, and a driver-level present interval fights it
+// (the D2R VR "VSync off - important" lesson). Shared by every device/reset
+// path so the steering can't drift between them. `what` tags the log line.
+void ForceImmediatePresentForXR(D3DPRESENT_PARAMETERS* pp, const char* what);
+
 class DeviceHooks
 {
 public:
@@ -60,7 +67,5 @@ public:
 private:
     DeviceHooks() = default;
 
-    IDirect3DDevice9* m_device = nullptr;
-    D3DPRESENT_PARAMETERS m_pp = {};
     bool m_curIsRHW = false;
 };

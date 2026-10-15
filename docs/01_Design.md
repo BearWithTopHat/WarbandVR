@@ -8,190 +8,243 @@ single-player only, without access to the game's source code.
 Fixed facts we design around:
 
 - Warband is a 32-bit DirectX 9, closed-source, custom-engine game (2010).
-- Official modding (module system) exposes game *logic*, never the renderer,
-  camera, or input pipeline. VR therefore requires engine-level injection.
-- The game already runs flawlessly on the user's PC → Steam Frame streaming
-  setup, with a controller scheme. So: **streaming and flat-input are solved
-  problems**; the mod only has to produce stereo frames and (later) accept
-  tracked input. The Frame itself never runs our code.
-- Single-player only, so no anti-cheat, no server compatibility, no fairness
-  concerns. We can reshape input as aggressively as we like.
+- Official modding (the Module System) exposes game *logic*, never the
+  renderer, camera, or low-level input pipeline. VR therefore requires
+  interception at the D3D9 boundary, plus ordinary module scripts for
+  equipment behavior.
+- The game already runs on the user's PC → Steam Frame streaming setup, with
+  a controller scheme. Streaming and flat input are therefore existing
+  infrastructure; the mod supplies stereo frames, head pose, and VR controller
+  input on the PC side.
+- Single-player only. No multiplayer support, networking code, anti-cheat
+  workaround, or engine memory writes.
+- Stock behavior is the escape hatch: with `EnableStereo=0`, the proxy is a
+  pass-through and all VR features stay inert.
 
 ## 2. Architecture overview
 
-```
+```text
 mb_warband.exe
    │  loads (app-dir DLL search order)
    ▼
 d3d9.dll  ← WarbandVR proxy
-   │  Direct3DCreate9 ──► real SysWOW64\d3d9.dll
-   │                         │ returns real IDirect3D9
-   │                         ▼
-   │              D3D9Proxy (delegating wrapper)
-   │                         │ CreateDevice
-   │                         ▼
-   │              DeviceProxy — FULL wrapper; the game holds OUR object
-   │                         │ BeginScene → substitute double-width RT
-   │                         │ SetTransform / VS-constant → capture view matrix
-   │                         │ DrawPrimitive* → execute twice, once per eye
-   │                         │ Present → composite SBS (M1) or OpenXR (M3)
-   │                         ▼
-   │              StereoRenderer — stereo target, eye matrices, composite
-   │                         │
-   │                         ▼
-   │              OpenXRBridge (M3) → OpenXR runtime → SteamVR → Steam Link
-   │                                                              │
-   ▼                                                              ▼
-  monitor (SBS, debugging)                              Steam Frame headset
+   │  Direct3DCreate9[/Ex] ──► real system/Wine d3d9.dll
+   │                              │ returns real IDirect3D9[Ex]
+   │                              ▼
+   │              D3D9Proxy / D3D9ExProxy (delegating wrappers)
+   │                              │ CreateDevice[/Ex]
+   │                              ▼
+   │              DeviceProxy — FULL device wrapper; game holds OUR object
+   │                              │ Begin/EndScene, Present, Clear,
+   │                              │ SetRenderTarget, SetTexture,
+   │                              │ SetTransform / VS constants,
+   │                              │ viewport/scissor, DrawPrimitive*
+   │                              ▼
+   │              StereoRenderer — per-eye targets, duplication gate,
+   │                              eye matrices, flat-UI handling, vignette,
+   │                              SBS composite or OpenXR handoff
+   │                              │
+   │                              ▼
+   │              OpenXRBridge — session/swapchains/frame loop/pose
+   │                              │
+   │                              ▼
+   │              MotionInput — OpenXR actions → keyboard/mouse input
+   │
+   ▼
+monitor SBS / OpenXR runtime → SteamVR → Steam Link → Steam Frame
 ```
 
-Key choice: **a full delegating device wrapper** (`DeviceProxy`), not vtable
-patching or Detours/MinHook. The original design patched the COM vtable in
-place; on the real game the Steam overlay (`gameoverlayrenderer.dll`) swaps
-the device object's vtable pointer to its own heap shadow and restores the
-original vtable memory, which silently bypassed every hook (and the
-half-hooked intermediate state crashed stereo bring-up). A full wrapper is
-immune: the game holds our object. Intercepted methods (18) route to
-`hkXxx` detours in `DeviceHooks.cpp`; the other ~120 methods forward
-verbatim. Calls from detours into `dev->Xxx(...)` dispatch through the
-real device's current vtable, so the overlay stays in the chain and keeps
-working.
+Key choice: **a full delegating COM wrapper** (`DeviceProxy`), not vtable
+patching or Detours/MinHook. Steam's overlay can replace a real device
+object's vtable pointer with a shadow table and restore the original memory,
+silently bypassing in-place patches. With a wrapper, the game holds our object
+and our vtable. Intercepted methods route to `hkXxx` functions in
+`DeviceHooks.cpp`; all other device methods forward verbatim. Internal calls
+run under `DeviceHooks::m_internal` so our own D3D work never re-enters the
+interception path.
 
 ## 3. Stereo rendering strategy
 
-Warband's renderer treats the camera as one view matrix per frame. We cannot
-make the *engine* render twice — but we can make every **draw call** execute
-twice, because at interception time all render state (streams, textures,
-shaders, transforms) is already set. The plan, per intercepted draw:
+Warband treats the camera as one view transform per frame. We cannot make the
+engine render twice, but at draw-call interception time all streams, textures,
+shaders, and transforms are already live. The renderer therefore executes
+eligible draw calls twice, once per eye.
 
-1. Set viewport to the left half of a double-width render target.
-2. Overwrite the view matrix with `EyeView(base, +IPD/2)` (see below).
-3. Call the original draw.
-4. Repeat for the right half with `-IPD/2`.
-5. Restore the game's viewport and view matrix.
+### 3.1 Per-eye game-sized surfaces
 
-`EyeView = Translation(+/- IPD/2, 0, 0) * view_base` (view-space eye offset —
-the standard "translate the camera in head space" formulation; see
-`MathUtil.h`). Projection stays the game's symmetric one at first (slight
-toe-in distortion, acceptable for M1). **M2 upgrade**: off-center (asymmetric)
-projection for geometrically correct stereo.
+The current architecture uses **two game-sized color targets and two
+game-sized depth buffers**, one pair per eye. It deliberately does not use a
+single double-width target.
 
-### 3.1 Where does the view matrix come from? (the M0 question)
+Per-eye targets matter because Warband's own coordinate-space assumptions stay
+intact per eye:
 
-DX9 games deliver view transforms two ways, and we support both
-(`WarbandVR.ini → ViewSource`):
+- viewports and scissor rects remain game-sized;
+- RHW/pre-transformed UI geometry lands where the game expects;
+- the Z-prepass and later `ZFUNC_EQUAL` color pass share the same eye's depth;
+- offscreen passes keep their own dimensions and textures.
 
-- **ViewSource=0 — fixed function**: `SetTransform(D3DTS_VIEW, …)`. We capture
-  it in `hkSetTransform` and overwrite per eye. Try this first — Warband is
-  old enough that much of its pipeline may be fixed-function.
-- **ViewSource=1 — shader constant**: the engine packs view (or view·proj)
-  into vertex shader registers via `SetVertexShaderConstantF`. We capture at
-  the configured register and rewrite it per eye. `docs/04` describes how to
-  find the right register with PIX/RenderDoc.
+The earlier double-width architecture failed exactly here: the mono Z-prepass
+only fed the left half's depth, so the right eye's equal-depth color pass
+collapsed to sky. That history is preserved in `docs/06`; it is not the
+current design.
 
-M0's job is to determine which Warband uses (likely *both*: fixed-function for
-some passes, shaders for skinned characters — in that case the agent must
-handle both simultaneously).
+### 3.2 Draw routing
 
-### 3.2 Render-target redirection
+`DeviceHooks::DrawBothEyes` asks the pure, unit-tested gate in
+`src/DupGate.h` what to do:
 
-At `BeginScene` we swap RT0 for our `2W × H` target and swap back at `Present`.
-Known hole (M2): if the engine re-points RT0 mid-frame (shadow maps, water
-reflections, scope views), those passes currently render to the game's own
-surfaces and then composite onto *our* target — mostly harmless, sometimes
-glitchy. The M2 fix is to track `SetRenderTarget` calls, keep a per-eye
-shadow copy chain, and duplicate offscreen passes per eye too. TODOs mark the
-hook points.
+- `Skip`: the draw samples a diverted main-sized surface whose scene was
+  already rerouted into the eye targets.
+- `MonoPassThrough`: the game is rendering to its own non-main-sized
+  offscreen target (for example a shadow map) and `OffscreenPasses` is not
+  actively substituting per-eye copies.
+- `FlatBothHalves`: a tiny UI/composite batch draws once into each eye with no
+  stereo shift, so text, boxes, and the final composite quad stay aligned.
+- `StereoBothEyes`: world geometry draws into left and right targets with
+  eye-adjusted transforms.
 
-### 3.3 Clear/scissor/viewport duplication
+At present, `Present` either composites the two eye targets side-by-side onto
+the real backbuffer (`OutputMode=0`) or hands them to OpenXR
+(`OutputMode=1`). `MirrorOnDesktop=1` keeps the SBS monitor image alive while
+an XR session runs.
 
-Full-target `Clear` covers both eyes in one call. Region clears and scissor
-rects are game-coordinate-space and need per-eye offsets (partially
-implemented, marked TODO(M2)). Viewports are set per eye in
-`StereoRenderer::ApplyEye`.
+### 3.3 Where the view matrix comes from
+
+Two delivery paths are supported:
+
+- `ViewSource=0`: fixed-function `SetTransform(D3DTS_VIEW, …)` matrices are
+  captured and replaced per eye.
+- `ViewSource=1`: the shader path reads the game's actual vertex-shader
+  register back with `GetVertexShaderConstantF` once per eye pair. This is
+  intentional: UI elements often reuse stale transforms, so trusting a cached
+  capture misaligns or reorders interface elements. The original register
+  value is restored after the pair.
+
+Warband's menu/loading observations strongly indicate the shader path is the
+important one, but both paths remain supported. Orthographic-looking matrices
+are treated as flat UI and are not eye-shifted.
+
+`AsymmetricProjection=1` optionally derives an off-center projection from the
+game's own perspective projection. It is available but remains opt-in until
+hardware A/B verification.
+
+### 3.4 Offscreen passes
+
+With `OffscreenPasses=0` (default), non-main-sized render-target scenes pass
+through untouched. That preserves the game's own shadow/reflection textures.
+With `OffscreenPasses=1`, main offscreen scenes can be represented by per-eye
+shadow render-target textures, and sampler bindings are swapped per eye. This
+is implemented but hardware-unverified and should stay off unless a specific
+scene requires it.
+
+### 3.5 Clear, viewport, and scissor state
+
+Eye targets are cleared once per frame. The game's own clears pass through
+unless an opt-in shadow pass is active. The game viewport and scissor state
+are tracked outside internal substitutions, applied per eye, and restored
+before control returns to the game.
 
 ## 4. Output paths
 
-- **M1 — SBS monitor** (`OutputMode=0`): two `StretchRect` calls at `Present`
-  copy each eye half onto the real backbuffer. Lets us validate geometry
-  stereo with zero VR hardware; cross-eye or record a video to check.
-- **M3 — OpenXR** (`OutputMode=1`, `WBVR_WITH_OPENXR` build): `OpenXRBridge`
-  owns an XrInstance/XrSession (D3D11 binding), two swapchains, and a frame
-  loop. The stereo surface reaches swapchain images via:
-  - *Short-term*: `GetRenderTargetData` → upload to a D3D11 texture →
-    `CopySubresourceRegion` into the swapchain image. Slow (~1–2 ms) but
-    correct; fine for first headset pixels.
-  - *Long-term*: D3D9Ex shared render target → `OpenSharedResource` in D3D11,
-    zero-copy. The proxy already wraps both creation entry points
-    (`D3D9Proxy` / `D3D9ExProxy`), so M3 can steer device creation through
-    Ex and share surfaces — a local change, not a new subsystem.
+- **SBS monitor** (`OutputMode=0`): two `StretchRect` calls composite the eye
+  targets onto the backbuffer. This remains the fastest bring-up and fallback
+  path.
+- **OpenXR** (`OutputMode=1`, `Release-OpenXR|Win32`): `OpenXRBridge` owns the
+  instance, D3D11 binding, session, reference space, two per-eye swapchains,
+  and the game-thread-coupled frame loop. `xrWaitFrame` paces the game.
+- **Slow submit path**: D3D9 eye surface → system-memory surface → D3D11
+  staging texture → swapchain image. Compatible first.
+- **Fast submit path** (`SharedSurface=1`): D3D9Ex shared eye textures are
+  opened as D3D11 resources and copied GPU-side. Device creation is steered to
+  Ex only when this option is enabled.
+- **Cinema mode** (`CinemaMode=1`): submits a fixed quad layer instead of the
+  immersive projection layer. Pair with `HeadTracking=0`.
 
-Once the mod speaks OpenXR on PC, **SteamVR + Steam Link streaming to the
-Frame is infrastructure the user already has** — no Frame-specific code.
+OpenXR initialization failure is not fatal: the bridge cleans partial state
+and retries periodically, while the desktop/SBS path remains available.
 
-## 5. Head tracking (M4)
+## 5. Head tracking
 
-Two layers, in order of implementation:
+The implemented path samples `xrLocateViews` once per XR frame at the
+predicted display time, derives a pose delta from a recentered reference,
+filters it with OneEuro smoothing, and composes it onto the captured view in
+`StereoRenderer::ApplyHeadDelta`.
 
-1. **Pose delta on the captured view matrix** (no engine RE needed):
-   `view = T(eye) * R(headDelta) * view_captured`, where `headDelta` comes
-   from `OpenXRBridge::GetHeadPoseDelta` (xrLocateViews at predicted display
-   time, relative to a recentered reference). Rotational tracking first;
-   positional scaled by `WorldScale`. This is VorpX-style "head-as-mouse"
-   and gets us 80% of presence for 20% of the work.
-2. **True camera coupling** (needs M0 RE results): write head pose directly
-   into the engine's camera struct before it builds the view matrix, so game
-   logic (collision, aim, mounted camera smoothing) stays consistent. The
-   M0 playbook (`docs/04`) produces the offsets; the write happens in a new
-   `EngineCamera` module called from `hkBeginScene`.
+Config keys cover the expected sign-convention problems (`InvertYaw`,
+`InvertPitch`, `InvertRoll`, `InvertPosX`, `InvertPosZ`) so runtime or engine
+handedness differences are tunable without a rebuild. `LockInMenus=1` freezes
+tracking when the captured view is static. A recenter hotkey and right-stick
+snap turning are implemented.
 
-Roll from head tracking should be applied; game-driven camera roll is rare in
-Warband, so no special handling. All tracking goes through a one-Euro or
-simple smoothing filter — raw poses fed into a DX9-era frame loop will jitter.
+The deeper alternative — writing directly into Warband's engine camera struct —
+is intentionally not active. It needs M0-C offsets per game build, and the
+project's safety rules prohibit unverified memory writes.
 
-## 6. Input (M5) — design before code
+## 6. Motion and controller input
 
-The user already plays flat with a controller, so **menus and map navigation
-are solved** — keep controllers emulating that scheme (Steam Input or
-SendInput injection) for everything except combat.
+MotionInput runs in the OpenXR build and uses one action per control with
+both `/user/hand/left` and `/user/hand/right` subaction paths. It converts
+controller state into OS-level keyboard/mouse input through the `IInputSink`
+seam; production uses `SendInput`, and tests install a recording sink.
 
-Combat is the interesting part. Warband melee = 4 directional attacks +
-directional blocks, chosen by mouse movement at button-press. Design:
+Implemented layers:
 
-1. Track controller angular velocity + linear swing vector each frame.
-2. On trigger threshold (configurable m/s), classify the swing's dominant
-   plane into {left, right, overhead, thrust}.
-3. Inject the corresponding mouse-movement-then-attack sequence the engine
-   expects (determined during M0/M4 RE; likely via `SendInput` mouse deltas
-   or by writing the engine's input state directly — RE will tell).
-4. Blocks: hold-to-block with direction from controller orientation.
-5. Archery: two-handed aim — bow hand = left controller position, draw hand
-   trigger; release arrow on draw-hand release past threshold.
+1. **Controller emulation**: left stick → WASD, right stick → mouse look or
+   snap turn, face buttons → configurable keys, triggers/grips → mouse
+   buttons when not owned by motion gestures.
+2. **Motion melee**: right-hand velocity is ring-buffered; a swing is
+   classified by its dominant axis into left, right, overhead, or thrust;
+   injection is mouse direction plus a held LMB. Continued hand motion steers
+   the held attack until the hand slows or a timeout releases it.
+3. **Gestures**: grip presses at head-relative body zones emit configurable
+   virtual-slot keys (defaults F1–F4), both grips emit F5, and releasing a
+   grip in a zone emits F6 for holster/stow behavior.
+4. **Bow draw ownership**: holding the right trigger owns LMB for a drawn
+   bow; swing injection is suppressed while that hold is active.
 
-Everything ships behind `InputMode` ini flags, defaulting to today's working
-controller scheme.
+The DLL deliberately does not decide inventory state. Equipment switching and
+reload rituals belong to the companion module (`module_system/`), which turns
+the synthetic keys into script-side Warband actions.
 
-## 7. Performance budget
+## 7. Performance model
 
-Target: stable 72 fps (Frame's minimum refresh) at 1080p-ish per eye on the
-host PC. Stereo doubles draw calls; Warband is CPU-bound in large battles
-(single-threaded agent AI), so battle size is the lever, not resolution. M2
-includes measuring added overhead (must be <4 ms/frame on the user's machine)
-and documenting recommended battle-sizer settings.
+Stereo duplication doubles intercepted draw work, while Warband's large
+battles are already CPU-bound. The built-in `[PERF]` rollup reports added
+duplication time every 600 frames. The initial target remains under 4 ms of
+added CPU time per frame at 1080p-class resolution and stable 72 fps on the
+host. Battle size is the primary user-facing performance lever.
 
-## 8. Failure modes & fallbacks
+The synchronous OpenXR frame loop trades architectural simplicity for pacing
+correctness. If hardware testing shows frame-pacing stalls, an asynchronous
+submission thread is a documented post-bring-up optimization, not a current
+assumption.
+
+## 8. Failure modes and fallbacks
 
 | Risk | Fallback |
 |---|---|
-| Warband uses shader-constant view matrices everywhere | ViewSource=1 path (built) |
-| View matrix can't be reliably captured | Z-buffer stereo (SuperDepth3D-style) as a degraded mode — documented, not implemented |
-| Engine camera write (M4) proves unstable | Stay on matrix-delta tracking forever (VorpX-style) |
-| OpenXR D3D9 path too slow | D3D9Ex shared-surface path; worst case, SBS → Steam Link's built-in SBS-to-VR |
-| Doubled draw calls tank big battles | Battle-size cap recommendation; dynamic IPD=0 fallback to mono for menus |
+| View source differs by scene or shader | `ViewSource=0/1` capture paths plus per-draw register readback |
+| Wrong `VSViewRegister` guess | implausible readbacks (NaN/Inf/zero/absurd) render mono, one-shot warning logged |
+| UI separates incorrectly | `SBSMonoUI` flat duplication; `UIMaxTriangles` and `UIZScaleMax`/`UIWScaleEps`/`UIRowNormMax` classifier tuning |
+| Steep-pitch views flatten | 3x3 row-norm guard in the UI classifier (`UIRowNormMax`) keeps rotations stereo |
+| Offscreen effects glitch | `OffscreenPasses=0` mono passthrough; opt-in per-eye shadows |
+| OpenXR runtime absent or slow to start | Logged retry; monitor/SBS path remains usable |
+| XR session/instance lost mid-game | full teardown plus 5 s reinit retry (loss events and error codes both handled) |
+| Runtime pacing fights the game limiter | `FramePacing=1` free-run submission throttle |
+| Shared-surface path misbehaves | `SharedSurface=0` slow copy path; `SharedSyncMode=1` event-query sync for one-eye tearing |
+| Steering spike whips the camera | `SteerMaxDeltaPx` per-poll clamp |
+| Grab reach misreads as a swing | `GrabRefractoryMs` post-grab swing suppression |
+| Head-pose axis mismatch | `[Tracking] Invert*` config keys |
+| Tracking discomfort | smoothing, snap turn, vignette, cinema mode |
+| Stereo overhead too high | lower resolution/battle size; disable experimental options |
+| Companion module absent | bind emitted keys to Warband's native controls or disable gestures |
 
 ## 9. Explicit non-goals
 
-- Multiplayer. Anti-cheat and server trust make it a different project.
-- Native Steam Frame (Arm64) execution — re-evaluate in a year; streaming is
-  the supported path.
-- Replacing the game's UI — we project it, we don't rebuild it.
+- Multiplayer or networking support.
+- Engine memory writes or build-specific camera/animation patching.
+- Replacing Warband's UI or mission scripting system.
+- Treating compile-only OpenXR code as hardware-verified.
+- Native Steam Frame execution as the primary path. A Phase 2 package exists
+  for experimentation, but PCVR streaming is the supported baseline.

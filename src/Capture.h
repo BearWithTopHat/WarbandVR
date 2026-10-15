@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
 // Capture: M0 reconnaissance tooling (task M0-1), built in from the start.

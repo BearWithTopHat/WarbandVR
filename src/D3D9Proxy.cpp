@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// COM wrapper objects deliberately keep a non-virtual destructor: adding one
+// would change the public vtable ABI. Release() uses the standard COM
+// delete-this idiom.
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+#endif
+
 #include "D3D9Proxy.h"
 #include "DeviceProxy.h"
 #include "DeviceHooks.h"
@@ -113,6 +121,9 @@ HRESULT __stdcall D3D9Proxy::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, H
              pPresentationParameters ? pPresentationParameters->BackBufferWidth : 0,
              pPresentationParameters ? pPresentationParameters->BackBufferHeight : 0,
              pPresentationParameters ? pPresentationParameters->Windowed : 0);
+
+    // XR output is paced by xrWaitFrame (see ForceImmediatePresentForXR).
+    ForceImmediatePresentForXR(pPresentationParameters, "CreateDevice");
 
     HRESULT hr = m_real->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags,
                                       pPresentationParameters, ppReturnedDeviceInterface);

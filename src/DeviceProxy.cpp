@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// COM wrapper objects deliberately keep a non-virtual destructor: adding one
+// would change the public vtable ABI. Release() uses the standard COM
+// delete-this idiom.
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+#endif
+
 #include "DeviceProxy.h"
 #include "DeviceHooks.h"
 #include "Logger.h"
@@ -722,4 +730,3 @@ HRESULT __stdcall DeviceProxy::GetDisplayModeEx(UINT iSwapChain, D3DDISPLAYMODEE
     if (!m_realEx) return D3DERR_INVALIDCALL;
     return m_realEx->GetDisplayModeEx(iSwapChain, pMode, pRotation);
 }
-

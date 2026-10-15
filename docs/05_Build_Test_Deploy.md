@@ -6,8 +6,32 @@
   MSVC v143, Windows 10/11 SDK.
 - Platform: **Win32 (x86)** — mandatory; Warband is 32-bit.
 - Default build: zero external dependencies (static CRT).
-- M3 only: OpenXR SDK (Khronos loader + headers). Install anywhere; point the
-  `Release-OpenXR` configuration's include/lib dirs at it.
+- M3 only: OpenXR SDK. Setup:
+  1. Get the SDK (Khronos release) with **Win32** loader binaries — the mod is
+     a 32-bit DLL, so `openxr_loader.lib`/`openxr_loader.dll` must be x86.
+     Prebuilt SDKs ship x64; for Win32 either build the loader from source
+     (cmake -A Win32) or use a package that provides x86 binaries.
+  2. Set the environment variable `OPENXR_SDK` to the SDK root (containing
+     `include/` and `lib/`), OR unpack it into `external\openxr` in the repo.
+  3. Build configuration **Release-OpenXR | Win32** (defines WBVR_WITH_OPENXR,
+     links openxr_loader.lib + d3d11.lib + dxgi.lib; output goes to
+     `Release-OpenXR\d3d9.dll`).
+  4. The game's folder needs the x86 `openxr_loader.dll` next to the proxy
+     (deploy.ps1 copies the built dll only — copy the loader manually once).
+  5. Runtime: SteamVR as the active OpenXR runtime on the host PC; Steam Link
+     to the Frame as usual.
+
+## Continuous integration
+
+`.github/workflows/build.yml` runs three jobs:
+
+1. Ubuntu: the complete headless regression gate (`tests/run_all.sh`).
+2. Windows: real MSVC `Release|Win32` with warnings treated as errors.
+3. Windows: real MSVC `Release-OpenXR|Win32`; the workflow builds an x86
+   OpenXR loader from the pinned Khronos SDK source first.
+
+Both Windows jobs verify that the resulting `d3d9.dll` has PE machine type
+`0x14c` (x86) and upload the DLL/PDB as build artifacts.
 
 ## Build
 
@@ -52,8 +76,10 @@ library outside Program Files — recommended; saves a lot of friction.)
 ## Debug logging
 
 `WarbandVR_log.txt` is written next to the exe, flushed every line (a crash
-never eats the last message). `LogLevel=3` is verbose — expect large files in
-battles; use only for targeted repro sessions.
+never eats the last message). The previous launch is rotated to
+`WarbandVR_log.prev.txt`, and a vectored exception handler logs hard faults
+as `CRASH ... at module+RVA` (docs/15). `LogLevel=3` is verbose — expect
+large files in battles; use only for targeted repro sessions.
 
 For live debugging, Visual Studio can attach to `mb_warband.exe`
 (Debug → Attach to Process) with the pdb in place — breakpoints in detours

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
 // CameraScan: M0 memory-reconnaissance helper (task M0-2).

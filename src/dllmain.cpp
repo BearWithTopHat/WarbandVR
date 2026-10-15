@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 // ============================================================================
 // WarbandVR - d3d9.dll proxy entry point and export forwarders.
 //
@@ -12,6 +13,7 @@
 #include "DeviceHooks.h"
 #include "StereoRenderer.h"
 #include "CameraScan.h"
+#include "OpenXRBridge.h"
 #include "Config.h"
 #include "Logger.h"
 
@@ -92,6 +94,27 @@ extern "C"
 IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion)
 {
     Startup();
+
+    // M3 fast-path steering: when OpenXR output with SharedSurface=1 is
+    // configured, create the game's object through Direct3DCreate9Ex so the
+    // device can allocate shared textures D3D11 can open. Any failure falls
+    // back to the plain path transparently.
+    if (Config::Get().outputMode == 1 && Config::Get().sharedSurface)
+    {
+        typedef HRESULT (WINAPI *ExFn)(UINT, IDirect3D9Ex**);
+        static ExFn realEx = reinterpret_cast<ExFn>(RealProc("Direct3DCreate9Ex"));
+        if (realEx)
+        {
+            IDirect3D9Ex* exObj = nullptr;
+            if (SUCCEEDED(realEx(SDKVersion, &exObj)) && exObj)
+            {
+                LOG_INFO("Direct3DCreate9(SDK=%u) -> steered to Ex object %p (SharedSurface)",
+                         SDKVersion, exObj);
+                return new D3D9ExProxy(exObj);
+            }
+            LOG_WARN("Direct3DCreate9Ex steering failed - using plain D3D9 path");
+        }
+    }
 
     typedef IDirect3D9* (WINAPI *Fn)(UINT);
     static Fn real = reinterpret_cast<Fn>(RealProc("Direct3DCreate9"));
@@ -218,6 +241,7 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID)
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
+        OpenXRBridge::Shutdown(); // releases XR session + any held emulated inputs
         CameraScan::Shutdown();
         DeviceHooks::Get().Shutdown();
         StereoRenderer::Get().Shutdown();

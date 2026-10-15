@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # WarbandVR deploy script
 # Copies the built proxy d3d9.dll + config next to mb_warband.exe.
 #

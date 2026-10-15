@@ -1,0 +1,133 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless-regression:
+    name: Headless regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install zig compiler wrapper
+        run: python -m pip install --upgrade pip ziglang
+
+      - name: Run complete headless gate
+        run: sh tests/run_all.sh
+
+  msvc-release:
+    name: MSVC Release Win32
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release Win32 with MSVC
+        run: >
+          msbuild WarbandVR.sln
+          /m
+          /p:Configuration=Release
+          /p:Platform=Win32
+          /p:TreatWarningAsError=true
+
+      - name: Verify x86 DLL output
+        shell: pwsh
+        run: |
+          $path = "Release\d3d9.dll"
+          if (!(Test-Path $path)) { throw "Missing $path" }
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x14C) {
+            throw ("Expected x86 machine 0x14C, got 0x{0:X4}" -f $machine)
+          }
+          Write-Host "Verified x86 DLL: $path"
+
+      - name: Upload Release DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: WarbandVR-Release-Win32
+          path: |
+            Release\d3d9.dll
+            Release\d3d9.pdb
+
+  msvc-openxr:
+    name: MSVC Release-OpenXR Win32
+    runs-on: windows-latest
+    env:
+      OPENXR_TAG: release-1.1.63
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Fetch OpenXR SDK source
+        shell: pwsh
+        run: >
+          git clone --depth 1 --branch $env:OPENXR_TAG
+          https://github.com/KhronosGroup/OpenXR-SDK.git external/openxr-src
+
+      - name: Build x86 OpenXR loader
+        shell: pwsh
+        run: >
+          cmake -S external/openxr-src -B external/openxr-build -A Win32
+          -DDYNAMIC_LOADER=ON;
+          cmake --build external/openxr-build --config Release
+          --target openxr_loader --parallel
+
+      - name: Stage OpenXR SDK layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path external/openxr/include, external/openxr/lib | Out-Null
+          Copy-Item -Recurse -Force external/openxr-src/include/* external/openxr/include/
+          $lib = Get-ChildItem external/openxr-build -Recurse -Filter openxr_loader.lib | Select-Object -First 1
+          if ($null -eq $lib) { throw "openxr_loader.lib was not produced" }
+          Copy-Item -Force $lib.FullName external/openxr/lib/openxr_loader.lib
+          "OPENXR_SDK=$PWD\external\openxr" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Staged x86 OpenXR loader from $($lib.FullName)"
+
+      - name: Build Release-OpenXR Win32 with MSVC
+        run: >
+          msbuild WarbandVR.sln
+          /m
+          /p:Configuration=Release-OpenXR
+          /p:Platform=Win32
+          /p:TreatWarningAsError=true
+
+      - name: Verify x86 OpenXR DLL output
+        shell: pwsh
+        run: |
+          $path = "Release-OpenXR\d3d9.dll"
+          if (!(Test-Path $path)) { throw "Missing $path" }
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x14C) {
+            throw ("Expected x86 machine 0x14C, got 0x{0:X4}" -f $machine)
+          }
+          Write-Host "Verified x86 OpenXR DLL: $path"
+
+      - name: Upload OpenXR DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: WarbandVR-Release-OpenXR-Win32
+          path: |
+            Release-OpenXR\d3d9.dll
+            Release-OpenXR\d3d9.pdb

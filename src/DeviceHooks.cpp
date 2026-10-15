@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "DeviceHooks.h"
 #include "StereoRenderer.h"
 #include "Config.h"
 #include "Logger.h"
 #include "Capture.h"
 #include "CameraScan.h"
+#include "DupGate.h"
 
 #include <vector>
 #include <iterator>
@@ -56,26 +58,34 @@ namespace
     {
         const Config& cfg = Config::Get();
 
-        // The draw samples a diverted surface (e.g. the world texture feeding
-        // the final composite blit). Its content is already in the eye
-        // targets; drawing it would paint an empty surface over the frame.
-        if (StereoRenderer::Get().DivertedTextureBound())
+        // Gate policy is pure (DupGate.h, unit-tested). Cases:
+        //  Skip:            the draw samples a diverted surface (e.g. the
+        //                   world texture feeding the final composite blit).
+        //                   Its content is already in the eye targets;
+        //                   drawing it would paint an empty surface.
+        //  MonoPassThrough: the game's own offscreen business (shadow map
+        //                   etc.) - stock behavior, textures keep content.
+        //  FlatBothHalves:  tiny UI batch - both eyes, no eye shift.
+        //  StereoBothEyes:  world geometry - full per-eye duplication.
+        const DupDecision decision = DecideDuplication(
+            StereoRenderer::Get().DivertedTextureBound(),
+            StereoRenderer::Get().CurrentRTIsMain(),
+            StereoRenderer::Get().ShadowActive(),
+            cfg.sbsMonoUI, primCount, cfg.uiMaxTriangles);
+
+        if (decision == DupDecision::Skip)
         {
             if (Capture::TraceActive())
                 Capture::Trace("SKIP draw (diverted texture) primCount=%d", primCount);
             return S_OK;
         }
-
-        // The game's own offscreen business (shadow map etc.): pass through,
-        // stock behavior - its textures keep their content for the game.
-        if (!StereoRenderer::Get().CurrentRTIsMain())
+        if (decision == DupDecision::MonoPassThrough)
         {
             if (Capture::TraceActive())
                 Capture::Trace("MONO draw (offscreen RT) primCount=%d", primCount);
             return draw();
         }
-
-        if (cfg.sbsMonoUI && primCount > 0 && primCount <= cfg.uiMaxTriangles)
+        if (decision == DupDecision::FlatBothHalves)
             return DrawMonoBothHalves(dev, draw);
 
         LARGE_INTEGER t0, t1;
@@ -131,6 +141,16 @@ namespace
     }
 }
 
+void ForceImmediatePresentForXR(D3DPRESENT_PARAMETERS* pp, const char* what)
+{
+    if (pp && Config::Get().outputMode == 1 && Config::Get().forceNoVsync &&
+        pp->PresentationInterval != D3DPRESENT_INTERVAL_IMMEDIATE)
+    {
+        LOG_INFO("%s: forcing D3DPRESENT_INTERVAL_IMMEDIATE for XR pacing", what);
+        pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Detours (invoked from DeviceProxy overrides; `dev` is the REAL device)
 // ---------------------------------------------------------------------------
@@ -138,6 +158,7 @@ HRESULT __stdcall hkReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
 {
     if (DeviceHooks::Get().m_internal) return dev->Reset(pp);
     LOG_INFO("Reset(%ux%u)", pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0);
+    ForceImmediatePresentForXR(pp, "Reset");
     StereoRenderer::Get().OnReset(dev, pp);       // release DEFAULT-pool stuff FIRST
     HRESULT hr = dev->Reset(pp);
     if (SUCCEEDED(hr)) LOG_INFO("Reset succeeded"); else LOG_ERROR("Reset failed hr=0x%08X", hr);
@@ -166,6 +187,16 @@ HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DS
     // business (pass through untouched).
     if (idx == 0)
     {
+        // M2 opt-in: the game's small offscreen RT passes (shadow maps and
+        // similar) get per-eye target textures instead of staying mono. The
+        // default remains OFF because pass semantics are engine-specific.
+        if (StereoOn() && Config::Get().offscreenPasses)
+        {
+            if (StereoRenderer::Get().ActivateShadowPass(dev, surf))
+                Capture::Trace("ShadowPass begin rt=%p", (void*)surf);
+            else
+                StereoRenderer::Get().EndShadowPass();
+        }
         StereoRenderer::Get().SetCurrentRT(surf);
         Capture::Trace("SetRenderTarget(%u, %p)", idx, surf);
     }
@@ -188,7 +219,7 @@ HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
     if (SUCCEEDED(hr))
     {
         DeviceHooks::Get().m_internal = true;
-        StereoRenderer::Get().OnBeginScene(dev);  // substitute stereo RT0
+        StereoRenderer::Get().OnBeginScene(dev);  // prepare per-eye targets
         DeviceHooks::Get().m_internal = false;
     }
     return hr;
@@ -200,7 +231,9 @@ HRESULT __stdcall hkEndScene(IDirect3DDevice9* dev)
     Capture::Trace("EndScene");
     Capture::EndFrame();
     CameraScan::OnFrame();
-    StereoRenderer::Get().OnEndScene(dev);
+    DeviceHooks::Get().m_internal = true;
+    StereoRenderer::Get().OnEndScene(dev); // may draw the comfort overlay per eye
+    DeviceHooks::Get().m_internal = false;
     return dev->EndScene();
 }
 
@@ -384,14 +417,12 @@ DeviceHooks& DeviceHooks::Get()
 
 void DeviceHooks::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
 {
-    m_device = device;
-    if (pp) m_pp = *pp;
     StereoRenderer::Get().OnDeviceCreated(device, pp);
 }
 
 void DeviceHooks::Shutdown()
 {
-    m_device = nullptr;
+    // Stateless by design; exists for symmetric teardown on DLL detach.
 }
 
 // ---------------------------------------------------------------------------

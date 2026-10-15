@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// COM wrapper objects deliberately keep a non-virtual destructor: adding one
+// would change the public vtable ABI. Release() uses the standard COM
+// delete-this idiom.
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdelete-non-abstract-non-virtual-dtor"
+#endif
+
 #include "D3D9ExProxy.h"
 #include "DeviceProxy.h"
 #include "DeviceHooks.h"
@@ -105,6 +113,8 @@ HRESULT __stdcall D3D9ExProxy::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType,
                                             IDirect3DDevice9** ppReturnedDeviceInterface)
 {
     LOG_INFO("ExProxy::CreateDevice(adapter=%u) - wrapping", Adapter);
+    ForceImmediatePresentForXR(pPresentationParameters, "ExProxy::CreateDevice");
+
     HRESULT hr = m_real->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags,
                                       pPresentationParameters, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
@@ -142,14 +152,18 @@ HRESULT __stdcall D3D9ExProxy::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceTyp
              pPresentationParameters ? pPresentationParameters->BackBufferWidth : 0,
              pPresentationParameters ? pPresentationParameters->BackBufferHeight : 0);
 
+    // Same XR pacing steering as CreateDevice - the Ex path is the one
+    // SharedSurface actually steers the game into, so it must not drift.
+    ForceImmediatePresentForXR(pPresentationParameters, "ExProxy::CreateDeviceEx");
+
     HRESULT hr = m_real->CreateDeviceEx(Adapter, DeviceType, hFocusWindow, BehaviorFlags,
                                         pPresentationParameters, pFullscreenDisplayMode,
                                         ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface)
     {
-        // The DeviceProxy implements the base IDirect3DDevice9; if the game
-        // needs Ex device methods it must QI, which forwards to the real
-        // object (calls through that pointer bypass the proxy - logged).
+        // DeviceProxy implements both IDirect3DDevice9 and IDirect3DDevice9Ex.
+        // A later QI for the Ex interface returns the same wrapper, so Ex
+        // device methods stay inside the interception layer too.
         IDirect3DDevice9* realDevice = *ppReturnedDeviceInterface;
         DeviceHooks::Get().OnDeviceCreated(realDevice, pPresentationParameters);
         *ppReturnedDeviceInterface = static_cast<IDirect3DDevice9Ex*>(new DeviceProxy(realDevice));

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # Sends keystrokes to the Warband window via SendInput with scan codes
 # (hardware-level injection that DirectInput games accept).
 param(

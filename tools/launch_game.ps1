@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # tools/launch_game.ps1
 # Launches mb_warband.exe and clicks through the Warband launcher dialog so
 # automated test runs reach the actual game. The launcher is a #32770 dialog

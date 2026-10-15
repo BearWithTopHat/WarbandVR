@@ -1,9 +1,14 @@
-# 00 — Human runbook: from this scaffold to first stereo image
+# 00 — Human runbook: build, verify, and bring up
 
-This is the exact sequence for the human half of the team. Everything the
-agent could do without the game is already done; what remains here is
-"install, build, run, read logs, report numbers." Estimated total human time
-to first stereo image: **one focused evening**.
+This is the exact sequence for the human half of the team. The code and
+headless tests are in place; what remains is "install, build, run, read logs,
+verify visuals/feel, report numbers." The current tree has already progressed
+beyond the original first-stereo scaffold: per-eye SBS rendering, OpenXR
+output, tracking, motion input, comfort options, and the companion module all
+exist, but hardware/runtime verification is still the gating step.
+
+Estimated human time for build + stock boot + SBS smoke test: **one focused
+evening**. Headset and motion-combat validation are additional sessions.
 
 ## Phase 0 — machine setup (30 min, once)
 
@@ -67,9 +72,12 @@ That phrase-level feedback maps directly onto the fix list in M1-1.
 
 ## Phase 4 — hand back to the agent
 
-From here the loop is: agent implements next task from `docs/03` → you build,
-deploy, run the acceptance checklist, report. M2+ needs only your eyes; M3+
-needs the headset; M5 needs your sword arm.
+From here the loop is: build and deploy the current package, run the
+acceptance checklist, report logs/screens/video, then apply the next fix.
+`docs/03_Agent_Prompts.md` is retained as a historical task-brief record;
+`docs/02_Milestones.md` and `docs/manual_test_checklist.md` are the current
+status and verification guides. M2 polish needs your eyes; M3+ needs the
+headset; M5 needs your sword arm.
 
 ## Cheat sheet: what each file in the log means
 
