@@ -69,6 +69,10 @@ public:
     void OnGameSetTexture(DWORD stage, IDirect3DBaseTexture9* tex);
     bool DivertedTextureBound() const { return !m_divertedBinds.empty(); }
 
+    // TEMP DIAG: F9-triggered per-draw logging (DrawBothEyes feeds primCount).
+    bool RbLogActive() const { return m_rbLog; }
+    void SetLogPrimCount(int pc) { m_logPrimCount = pc; }
+
     // Matrix capture (fed by the SetTransform / VS-constant hooks)
     void CaptureViewMatrix(const D3DMATRIX& m);
     void CaptureProjectionMatrix(const D3DMATRIX& m);
@@ -175,6 +179,13 @@ private:
     bool       m_active    = false;  // stereo duplication currently in effect
     int        m_loggedViews = 0;    // M0 debugging: log first N view matrices
     unsigned   m_viewCaptures = 0;   // total view captures (periodic logging)
+
+    // TEMP DIAG: F9 toggles per-pair register logging, F10 dumps eye surfaces
+    // (checked in OnBeginScene, so a capture can be landed exactly on a menu).
+    bool       m_rbLog       = false;
+    bool       m_f9Down      = false;
+    bool       m_f10Down     = false;
+    int        m_logPrimCount = -1;  // primCount of the pair being logged
 
     // Shader-path register handling: the game's c0 as read back at the start
     // of the current eye pair, whether it was restored yet, and whether our

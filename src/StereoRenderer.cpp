@@ -195,6 +195,21 @@ void StereoRenderer::ReleaseResources()
 void StereoRenderer::OnBeginScene(IDirect3DDevice9* device)
 {
     CheckRecenterKey();
+
+    // TEMP DIAG: F9 toggles register logging, F10 dumps the eye surfaces
+    // (previous frame's content - exactly what is on screen).
+    bool f9 = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+    if (f9 && !m_f9Down)
+    {
+        m_rbLog = !m_rbLog;
+        LOG_INFO("DIAG: RB logging %s", m_rbLog ? "ON" : "OFF");
+    }
+    m_f9Down = f9;
+    bool f10 = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+    if (f10 && !m_f10Down && m_eyeSurf[0])
+        DumpStereoSurface(device, m_dumpedFrames++);
+    m_f10Down = f10;
+
     if (!Config::Get().enableStereo) return;
     if (!m_eyeSurf[0]) { CreateResources(device); if (!m_eyeSurf[0]) return; }
     m_active = true;
@@ -789,6 +804,24 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
                          "rendering mono this pair (check [Stereo] VSViewRegister)",
                          cfg.vsViewRegister, buf);
                 m_loggedImplausible = true;
+            }
+            if (m_rbLog) // TEMP DIAG: every pair's actual register (F9 toggles)
+            {
+                const D3DMATRIX& rm = m_lastReadback;
+                const bool flat = !m_readbackPlausible
+                               || Mat::IsFlatOrtho(rm, cfg.uiZScaleMax, cfg.uiWScaleEps,
+                                                   cfg.uiRowNormMax);
+                D3DVIEWPORT9 vpNow{};
+                device->GetViewport(&vpNow);
+                IDirect3DVertexShader9* vs = nullptr;
+                device->GetVertexShader(&vs);
+                LOG_INFO("RB pc=%d flat=%d plaus=%d vs=%p t=%.3f,%.3f,%.3f m33=%.3f m44=%.3f vp=%u,%u %ux%u gamevp=%u,%u %ux%u",
+                         m_logPrimCount, flat ? 1 : 0, m_readbackPlausible ? 1 : 0,
+                         static_cast<void*>(vs),
+                         rm._41, rm._42, rm._43, rm._33, rm._44,
+                         vpNow.X, vpNow.Y, vpNow.Width, vpNow.Height,
+                         m_gameVp.X, m_gameVp.Y, m_gameVp.Width, m_gameVp.Height);
+                if (vs) vs->Release();
             }
         }
 

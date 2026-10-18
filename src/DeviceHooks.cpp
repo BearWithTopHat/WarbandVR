@@ -74,16 +74,26 @@ namespace
         {
             if (Capture::TraceActive())
                 Capture::Trace("SKIP draw (diverted texture) primCount=%d", primCount);
+            if (StereoRenderer::Get().RbLogActive())
+                LOG_INFO("RB SKIP diverted pc=%d", primCount);
             return S_OK;
         }
         if (decision == DupDecision::MonoPassThrough)
         {
             if (Capture::TraceActive())
                 Capture::Trace("MONO draw (offscreen RT) primCount=%d", primCount);
+            if (StereoRenderer::Get().RbLogActive())
+                LOG_INFO("RB MONO offscreen pc=%d", primCount);
             return draw();
         }
         if (decision == DupDecision::FlatBothHalves)
+        {
+            if (StereoRenderer::Get().RbLogActive())
+                LOG_INFO("RB MONOUI pc=%d", primCount);
             return DrawMonoBothHalves(dev, draw);
+        }
+
+        StereoRenderer::Get().SetLogPrimCount(primCount);
 
         LARGE_INTEGER t0, t1;
         QueryPerformanceCounter(&t0);
