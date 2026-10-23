@@ -94,6 +94,16 @@ Check in order:
 5. Slow path first: `SharedSurface=0`.
 6. Steam Link streaming already works for the flat game.
 
+### Menus or dialog text sit in the wrong place (misaligned with backgrounds)
+
+That was the encounter-dialog layout bug: fixed-function UI with an identity
+view matrix and an orthographic projection was being eye-shifted, and under
+an ortho projection a view translation is a pure screen-space offset — text
+moved while backgrounds drawn through the flat path stayed put. Current
+builds gate the eye view shift on the PROJECTION type: only perspective
+scenes get it; orthographic/2D UI stays flat and identical in both eyes. If
+you still see it on a current build, capture a frame dump and the log.
+
 ### Head movement is mirrored or moves the wrong axis
 
 Use `[Tracking] InvertYaw`, `InvertPitch`, `InvertRoll`, `InvertPosX`, or

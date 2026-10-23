@@ -703,12 +703,18 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         // M4: head pose delta composes onto the captured view first.
         D3DMATRIX headView = ApplyHeadDelta(m_baseView);
 
-        // UI passes use an orthographic projection (tiny z-scale, w == 1).
-        // Stereo-shifting those misaligns text against flat-drawn boxes, so
-        // draw them flat (identical in both eyes). 3D view/world matrices are
-        // orthonormal (|_33| ~ 1); viewproj matrices are non-affine.
-        const bool flatUI = Mat::IsFlatOrtho(headView, cfg.uiZScaleMax, cfg.uiWScaleEps,
-                                             cfg.uiRowNormMax);
+        // Fixed-function UI is often drawn with an IDENTITY view matrix and
+        // an orthographic projection. A view-matrix-only classifier cannot
+        // see that case: identity is a valid 3D view, so it was eye-shifted,
+        // and under an ortho projection a view translation is a pure
+        // screen-space offset - dialog text moved relative to backgrounds
+        // that the flat path drew correctly (the encounter-dialog layout
+        // bug). Gate on the PROJECTION type instead: only perspective scenes
+        // get the eye view shift; orthographic/2D projections stay flat in
+        // both eyes. With no projection captured yet, keep the old heuristic.
+        const bool flatUI = m_hasProj
+            ? !Mat::IsPerspective(m_baseProj)
+            : Mat::IsFlatOrtho(headView, cfg.uiZScaleMax, cfg.uiWScaleEps, cfg.uiRowNormMax);
         D3DMATRIX eyeView  = flatUI ? headView : Mat::EyeView(headView, halfSep, eye);
 
         // Fixed-function path: overwrite the VIEW transform for this eye.

@@ -51,6 +51,10 @@ namespace Mat
     {
         return MatToD3D(MatPure::Transpose3x3(MatFromD3D(m)));
     }
+    inline bool IsPerspective(const D3DMATRIX& proj)
+    {
+        return MatPure::IsPerspective(MatFromD3D(proj));
+    }
     inline bool IsFlatOrtho(const D3DMATRIX& m, float zScaleMax, float wEps, float rowNormMax)
     {
         return MatPure::IsFlatOrtho(MatFromD3D(m), zScaleMax, wEps, rowNormMax);

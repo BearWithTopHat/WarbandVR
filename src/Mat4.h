@@ -63,12 +63,16 @@ namespace MatPure
     // own symmetric perspective projection. Avoids the toe-in distortion of a
     // pure view shift. Falls back to the unmodified matrix for orthographic or
     // unrecognised projections (can't shift what we can't parse).
+    // Row-major D3D perspective projection has _34 == 1 and _44 == 0.
+    inline bool IsPerspective(const Mat4& proj)
+    {
+        const float* f = &proj._11;
+        return std::fabs(f[11] - 1.0f) < 1e-3f && std::fabs(f[15]) < 1e-4f;
+    }
+
     inline Mat4 EyeProjection(const Mat4& proj, float halfSep, int eye)
     {
-        // Row-major D3D perspective projection has _34 == 1 and _44 == 0.
-        const float* f = &proj._11;
-        bool isPerspective = std::fabs(f[11] - 1.0f) < 1e-3f && std::fabs(f[15]) < 1e-4f;
-        if (!isPerspective)
+        if (!IsPerspective(proj))
             return proj; // orthographic or unknown: shift not applicable
 
         // Recover near plane: _33 = f/(f-n) and _43 = -n*_33  =>  n = -_43/_33

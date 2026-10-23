@@ -300,8 +300,8 @@ HRESULT __stdcall hkSetTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBase
 
 HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9* dev, const RECT* rect)
 {
-    // Track the game's intended rect; ApplyEye re-applies it per eye with a
-    // horizontal offset when the scissor test is enabled.
+    // Track the game's intended rect; ApplyEye re-applies it as-is on the
+    // game-sized eye targets (no offset needed there).
     if (!DeviceHooks::Get().m_internal && rect)
     {
         StereoRenderer::Get().SetGameScissorRect(*rect);

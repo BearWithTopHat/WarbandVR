@@ -226,7 +226,8 @@ assumption.
 |---|---|
 | View source differs by scene or shader | `ViewSource=0/1` capture paths plus per-draw register readback |
 | Wrong `VSViewRegister` guess | implausible readbacks (NaN/Inf/zero/absurd) render mono, one-shot warning logged |
-| UI separates incorrectly | `SBSMonoUI` flat duplication; `UIMaxTriangles` and `UIZScaleMax`/`UIWScaleEps`/`UIRowNormMax` classifier tuning |
+| UI separates incorrectly | `SBSMonoUI` flat duplication; `UIMaxTriangles` and `UIZScaleMax`/`UIWScaleEps`/`UIRowNormMax` classifier tuning; projection-type gate (ortho UI never eye-shifted) |
+| Dialog text offset from backgrounds | Fixed: identity-view + ortho-projection UI was eye-shifted (a pure screen-space offset). Only perspective scenes get the view shift now |
 | Steep-pitch views flatten | 3x3 row-norm guard in the UI classifier (`UIRowNormMax`) keeps rotations stereo |
 | Offscreen effects glitch | `OffscreenPasses=0` mono passthrough; opt-in per-eye shadows |
 | OpenXR runtime absent or slow to start | Logged retry; monitor/SBS path remains usable |
