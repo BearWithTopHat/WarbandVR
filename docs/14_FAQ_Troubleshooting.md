@@ -94,6 +94,17 @@ Check in order:
 5. Slow path first: `SharedSurface=0`.
 6. Steam Link streaming already works for the flat game.
 
+### Water/ocean shows a repeating animal (or other offscreen) texture
+
+That was a texture-state leak, not an ocean problem: after an offscreen
+shadow pass, the per-eye copies were being substituted into samplers for
+**every** later draw, including the main scene. So whatever the engine last
+rendered offscreen (an animal portrait, an icon, a livestock texture) could
+appear on water or other geometry. Fixed: shadow texture substitution now
+happens **only while that shadow pass is active**, and the game's own
+texture is always restored afterward. If you see it on a current build,
+send a frame dump and the log.
+
 ### Menus or dialog text sit in the wrong place (misaligned with backgrounds)
 
 That was the encounter-dialog layout bug: fixed-function UI with an identity

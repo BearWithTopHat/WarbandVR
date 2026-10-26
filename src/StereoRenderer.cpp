@@ -690,9 +690,14 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         device->SetScissorRect(&r);
     }
 
-    // Samplers bound to a shadowed surface get this eye's copy (M2).
-    for (const auto& bind : m_shadowBinds)
-        device->SetTexture(bind.first, bind.second->eyeTex[eye]);
+    // Samplers bound to the ACTIVE shadow pass's surface get this eye's copy
+    // (M2). ONLY during that pass: applying these binds to later main-scene
+    // draws would leak offscreen content into unrelated geometry (an
+    // offscreen animal portrait could end up on the ocean).
+    if (m_shadowActive)
+        for (const auto& bind : m_shadowBinds)
+            if (bind.second == m_shadowActive)
+                device->SetTexture(bind.first, bind.second->eyeTex[eye]);
 
     if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
 
@@ -782,9 +787,14 @@ void StereoRenderer::RestoreGameState(IDirect3DDevice9* device)
         device->SetViewport(&m_gameVp);
     if (m_scissorEnabled && m_hasScissor)
         device->SetScissorRect(&m_gameScissor);
-    for (const auto& bind : m_shadowBinds)
-        device->SetTexture(bind.first, bind.second->gameTex ? bind.second->gameTex
-                                                            : bind.second->eyeTex[0]);
+    // Restore the game's own texture for the ACTIVE shadow's stages only.
+    // Every bind in m_shadowBinds has gameTex set at creation, so there is
+    // no legitimate fallback to an eye copy - substituting one would leak
+    // our render into the game's subsequent draws.
+    if (m_shadowActive)
+        for (const auto& bind : m_shadowBinds)
+            if (bind.second == m_shadowActive && bind.second->gameTex)
+                device->SetTexture(bind.first, bind.second->gameTex);
     if (m_uploadedThisPair && Config::Get().viewSource == 1)
     {
         // Put the game's own register back exactly as we found it.
