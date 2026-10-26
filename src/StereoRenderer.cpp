@@ -466,7 +466,27 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
         D3DSURFACE_DESC srcDesc{};
         m_eyeSurf[eye]->GetDesc(&srcDesc);
         RECT src = { 0, 0, static_cast<LONG>(srcDesc.Width), static_cast<LONG>(srcDesc.Height) };
-        RECT dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
+
+        // The game lays out menus and text for the FULL window width. Simply
+        // stretching each full-width eye into its split panel distorts that
+        // UI per panel (the "menu glitch" report). Fit the eye into the
+        // panel while preserving its aspect ratio and letterbox the rest;
+        // SBSAspectCorrect=0 restores the old stretch-to-fill behavior.
+        RECT dst;
+        if (Config::Get().sbsAspectCorrect)
+        {
+            const float sx = static_cast<float>(halfW) / static_cast<float>(srcDesc.Width);
+            const float sy = static_cast<float>(bbH) / static_cast<float>(srcDesc.Height);
+            const float s = sx < sy ? sx : sy;
+            const LONG w = static_cast<LONG>(srcDesc.Width * s + 0.5f);
+            const LONG h = static_cast<LONG>(srcDesc.Height * s + 0.5f);
+            const LONG x0 = eye * halfW + (halfW - w) / 2;
+            const LONG y0 = (bbH - h) / 2;
+            dst = { x0, y0, x0 + w, y0 + h };
+        }
+        else
+            dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
+
         // D3DTEXF_NONE keeps this legal for equal-format surfaces.
         device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
     }

@@ -94,6 +94,16 @@ Check in order:
 5. Slow path first: `SharedSurface=0`.
 6. Steam Link streaming already works for the flat game.
 
+### SBS menu looks distorted or laid out for the full window
+
+The game always lays out menus and text for the **full window width** — a
+proxy can't make it think each split panel has its own resolution. The old
+composite stretched each full-width eye into its half of the monitor, which
+distorted that UI per panel. The composite now **preserves aspect ratio and
+letterboxes** each eye into its panel, so menus and text keep their
+proportions. `[Output] SBSAspectCorrect=0` restores the old stretch-to-fill
+behavior if you prefer it.
+
 ### Water/ocean shows a repeating animal (or other offscreen) texture
 
 That was a texture-state leak, not an ocean problem: after an offscreen

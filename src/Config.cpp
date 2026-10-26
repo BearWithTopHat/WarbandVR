@@ -119,6 +119,7 @@ void Config::Load()
     outputMode           = GetPrivateProfileIntA("Output", "OutputMode", outputMode, path);
     sharedSurface        = GetBool(path, "Output", "SharedSurface", sharedSurface);
     mirrorOnDesktop      = GetBool(path, "Output", "MirrorOnDesktop", mirrorOnDesktop);
+    sbsAspectCorrect     = GetBool(path, "Output", "SBSAspectCorrect", sbsAspectCorrect);
     forceNoVsync         = GetBool(path, "Output", "ForceNoVsync", forceNoVsync);
     cinemaMode           = GetBool(path, "Output", "CinemaMode", cinemaMode);
     framePacing          = GetPrivateProfileIntA("Output", "FramePacing", framePacing, path);

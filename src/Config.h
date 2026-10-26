@@ -36,6 +36,9 @@ struct Config
                                           // Ex; keep off until slow path works)
     bool  mirrorOnDesktop       = false;  // composite SBS to the monitor even
                                           // while the XR session runs (spectator)
+    bool  sbsAspectCorrect      = true;   // letterbox per-eye images into the
+                                          // split panels instead of stretching
+                                          // (menus keep their aspect ratio)
     bool  forceNoVsync          = true;   // force present-interval immediate when
                                           // OutputMode=1 (XR pacing owns the rate)
     bool  cinemaMode            = false;  // fixed quad layer instead of immersive
