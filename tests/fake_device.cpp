@@ -170,6 +170,7 @@ HRESULT __stdcall FakeDevice::GetTransform(D3DTRANSFORMSTATETYPE st, D3DMATRIX* 
 HRESULT __stdcall FakeDevice::SetTexture(DWORD stage, IDirect3DBaseTexture9* t)
 {
     if (stage < 16) textures[stage] = t;
+    Fake::Recordf("SetTexture %u=%p", (unsigned)stage, (void*)t);
     return S_OK;
 }
 HRESULT __stdcall FakeDevice::SetRenderState(D3DRENDERSTATETYPE st, DWORD v)
@@ -235,9 +236,11 @@ HRESULT __stdcall FakeDevice::DrawTriPatch(UINT h, const float*, const D3DTRIPAT
 }
 
 HRESULT __stdcall FakeDevice::StretchRect(IDirect3DSurface9*, const RECT*, IDirect3DSurface9*,
-                                          const RECT*, D3DTEXTUREFILTERTYPE)
+                                          const RECT* d, D3DTEXTUREFILTERTYPE)
 {
-    Fake::Record("StretchRect"); return S_OK;
+    if (d) Fake::Recordf("StretchRect dst=%ld,%ld,%ld,%ld", d->left, d->top, d->right, d->bottom);
+    else   Fake::Record("StretchRect");
+    return S_OK;
 }
 HRESULT __stdcall FakeDevice::GetRenderTargetData(IDirect3DSurface9*, IDirect3DSurface9*)
 {

@@ -581,7 +581,7 @@ index 9d5f95c..f5919f1 100644
 +Behavior changes require matching test updates. Do not weaken tests to make a
 +change pass.
 diff --git a/WarbandVR.ini b/WarbandVR.ini
-index 90469af..9c5beda 100644
+index 90469af..2d79e5a 100644
 --- a/WarbandVR.ini
 +++ b/WarbandVR.ini
 @@ -15,9 +15,10 @@ EnableStereo=0
@@ -597,7 +597,7 @@ index 90469af..9c5beda 100644
  
  ; Where the per-frame view matrix comes from. SET THIS FROM M0 CAPTURE RESULTS.
  ;   0 = fixed-function SetTransform(D3DTS_VIEW)   (try this first)
-@@ -27,24 +28,79 @@ ViewSource=0
+@@ -27,24 +28,83 @@ ViewSource=0
  ; Vertex shader register (float4 x4) holding the VIEW or VIEWPROJ matrix,
  ; used when ViewSource=1. Found during milestone M0 (docs/04).
  VSViewRegister=0
@@ -660,6 +660,10 @@ index 90469af..9c5beda 100644
 +; Composite the stereo image to the desktop monitor even while the XR
 +; session runs (spectator view). Costs a little per-frame GPU time.
 +MirrorOnDesktop=0
++; SBS monitor composite: 1 preserves each eye's aspect ratio and letterboxes
++; it into its split panel (menus and text keep their proportions). 0 restores
++; the old behavior of stretching each eye to fill the panel.
++SBSAspectCorrect=1
 +; Force the game's present interval to immediate when OutputMode=1 - XR frame
 +; pacing (xrWaitFrame) owns the rate; vsync would fight it and can halve the
 +; per-eye throughput. Keep 1 unless diagnosing pacing issues.
@@ -682,7 +686,7 @@ index 90469af..9c5beda 100644
  [Tracking]
  ; M4 head tracking. Requires the OpenXR pose source (M3) to exist; until then
  ; these are plumbed but inert.
-@@ -57,10 +113,102 @@ RecenterKey=0x77
+@@ -57,10 +117,102 @@ RecenterKey=0x77
  ; Freeze tracking when the camera has been static for 250ms (menus/map).
  LockInMenus=1
  
@@ -786,7 +790,7 @@ index 90469af..9c5beda 100644
  
  [Debug]
  ; 0 = errors only, 1 = +warnings, 2 = +info, 3 = verbose (slow, big logs)
-@@ -73,6 +221,7 @@ LogViewMatrices=25
+@@ -73,6 +225,7 @@ LogViewMatrices=25
  ;   0 = off
  ;   1 = per-frame summary of SetTransform VIEW/PROJECTION activity
  ;   2 = per-frame ranking of shader registers holding matrix-like data
@@ -794,7 +798,7 @@ index 90469af..9c5beda 100644
  CaptureMode=0
  
  ; M0 memory scanner (docs/04 part C). Set ExpectedPos to a position you are
-@@ -83,3 +232,8 @@ ExpectedPos=
+@@ -83,3 +236,8 @@ ExpectedPos=
  ; Optional manual range override (hex). Default = the exe's .data section.
  ScanBase=0x0
  ScanSize=0x0
@@ -1024,10 +1028,10 @@ index af575ba..8bc9eb1 100644
 +| Full game in left half, sky-only right half (fixed 2026-10-02) | Fullscreen composite quad (2 tris) hit the "draw once" UI heuristic and only ever covered the left half of the stereo target | Update to the patched `StereoRenderer`/`DeviceHooks`; see docs/06 entry of 2026-10-02 |
 +| Anything else new | unknown | Set `[Debug] DumpFrames=5`, grab `WarbandVR_frameNNN.bmp` + `WarbandVR_log.txt`, hand both to the agent - the dump shows exactly what each eye half contains |
 diff --git a/docs/01_Design.md b/docs/01_Design.md
-index 0375a7f..f819a1f 100644
+index 0375a7f..605f395 100644
 --- a/docs/01_Design.md
 +++ b/docs/01_Design.md
-@@ -8,183 +8,243 @@ single-player only, without access to the game's source code.
+@@ -8,183 +8,244 @@ single-player only, without access to the game's source code.
  Fixed facts we design around:
  
  - Warband is a 32-bit DirectX 9, closed-source, custom-engine game (2010).
@@ -1404,7 +1408,8 @@ index 0375a7f..f819a1f 100644
 -| Doubled draw calls tank big battles | Battle-size cap recommendation; dynamic IPD=0 fallback to mono for menus |
 +| View source differs by scene or shader | `ViewSource=0/1` capture paths plus per-draw register readback |
 +| Wrong `VSViewRegister` guess | implausible readbacks (NaN/Inf/zero/absurd) render mono, one-shot warning logged |
-+| UI separates incorrectly | `SBSMonoUI` flat duplication; `UIMaxTriangles` and `UIZScaleMax`/`UIWScaleEps`/`UIRowNormMax` classifier tuning |
++| UI separates incorrectly | `SBSMonoUI` flat duplication; `UIMaxTriangles` and `UIZScaleMax`/`UIWScaleEps`/`UIRowNormMax` classifier tuning; projection-type gate (ortho UI never eye-shifted) |
++| Dialog text offset from backgrounds | Fixed: identity-view + ortho-projection UI was eye-shifted (a pure screen-space offset). Only perspective scenes get the view shift now |
 +| Steep-pitch views flatten | 3x3 row-norm guard in the UI classifier (`UIRowNormMax`) keeps rotations stereo |
 +| Offscreen effects glitch | `OffscreenPasses=0` mono passthrough; opt-in per-eye shadows |
 +| OpenXR runtime absent or slow to start | Logged retry; monitor/SBS path remains usable |
@@ -3090,10 +3095,10 @@ index 0000000..119473f
 +native source fork.
 diff --git a/docs/14_FAQ_Troubleshooting.md b/docs/14_FAQ_Troubleshooting.md
 new file mode 100644
-index 0000000..958f577
+index 0000000..95d23bc
 --- /dev/null
 +++ b/docs/14_FAQ_Troubleshooting.md
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,186 @@
 +# 14 — FAQ and troubleshooting
 +
 +This page collects the likely failure modes from the risk register and the
@@ -3189,6 +3194,37 @@ index 0000000..958f577
 +4. `EnableStereo=1` and `OutputMode=1`.
 +5. Slow path first: `SharedSurface=0`.
 +6. Steam Link streaming already works for the flat game.
++
++### SBS menu looks distorted or laid out for the full window
++
++The game always lays out menus and text for the **full window width** — a
++proxy can't make it think each split panel has its own resolution. The old
++composite stretched each full-width eye into its half of the monitor, which
++distorted that UI per panel. The composite now **preserves aspect ratio and
++letterboxes** each eye into its panel, so menus and text keep their
++proportions. `[Output] SBSAspectCorrect=0` restores the old stretch-to-fill
++behavior if you prefer it.
++
++### Water/ocean shows a repeating animal (or other offscreen) texture
++
++That was a texture-state leak, not an ocean problem: after an offscreen
++shadow pass, the per-eye copies were being substituted into samplers for
++**every** later draw, including the main scene. So whatever the engine last
++rendered offscreen (an animal portrait, an icon, a livestock texture) could
++appear on water or other geometry. Fixed: shadow texture substitution now
++happens **only while that shadow pass is active**, and the game's own
++texture is always restored afterward. If you see it on a current build,
++send a frame dump and the log.
++
++### Menus or dialog text sit in the wrong place (misaligned with backgrounds)
++
++That was the encounter-dialog layout bug: fixed-function UI with an identity
++view matrix and an orthographic projection was being eye-shifted, and under
++an ortho projection a view translation is a pure screen-space offset — text
++moved while backgrounds drawn through the flat path stayed put. Current
++builds gate the eye view shift on the PROJECTION type: only perspective
++scenes get it; orthographic/2D UI stays flat and identical in both eyes. If
++you still see it on a current build, capture a frame dump and the log.
 +
 +### Head movement is mirrored or moves the wrong axis
 +
@@ -4144,7 +4180,7 @@ index 0000000..21f288f
 +    }
 +}
 diff --git a/src/Config.cpp b/src/Config.cpp
-index 5f27ebc..b16b49b 100644
+index 5f27ebc..93d31cc 100644
 --- a/src/Config.cpp
 +++ b/src/Config.cpp
 @@ -1,5 +1,8 @@
@@ -4206,7 +4242,7 @@ index 5f27ebc..b16b49b 100644
  }
  
  Config& Config::Get() { return g_cfg; }
-@@ -60,17 +90,85 @@ void Config::Load()
+@@ -60,17 +90,86 @@ void Config::Load()
      char path[MAX_PATH];
      IniPath(path, sizeof(path));
  
@@ -4240,6 +4276,7 @@ index 5f27ebc..b16b49b 100644
      outputMode           = GetPrivateProfileIntA("Output", "OutputMode", outputMode, path);
 +    sharedSurface        = GetBool(path, "Output", "SharedSurface", sharedSurface);
 +    mirrorOnDesktop      = GetBool(path, "Output", "MirrorOnDesktop", mirrorOnDesktop);
++    sbsAspectCorrect     = GetBool(path, "Output", "SBSAspectCorrect", sbsAspectCorrect);
 +    forceNoVsync         = GetBool(path, "Output", "ForceNoVsync", forceNoVsync);
 +    cinemaMode           = GetBool(path, "Output", "CinemaMode", cinemaMode);
 +    framePacing          = GetPrivateProfileIntA("Output", "FramePacing", framePacing, path);
@@ -4293,7 +4330,7 @@ index 5f27ebc..b16b49b 100644
  
      headTracking         = GetBool(path, "Tracking", "HeadTracking", headTracking);
      trackingSmoothing    = GetBool(path, "Tracking", "Smoothing", trackingSmoothing);
-@@ -79,29 +177,37 @@ void Config::Load()
+@@ -79,29 +178,37 @@ void Config::Load()
      recenterKey          = static_cast<int>(GetULong(path, "Tracking", "RecenterKey",
                                                       static_cast<unsigned long>(recenterKey)));
      lockInMenus          = GetBool(path, "Tracking", "LockInMenus", lockInMenus);
@@ -4336,7 +4373,7 @@ index 5f27ebc..b16b49b 100644
 +             comfortVignette ? 1 : 0, vignetteStrength, worldScalePreset);
  }
 diff --git a/src/Config.h b/src/Config.h
-index a31ae29..770b0b2 100644
+index a31ae29..52e95e6 100644
 --- a/src/Config.h
 +++ b/src/Config.h
 @@ -1,3 +1,4 @@
@@ -4344,7 +4381,7 @@ index a31ae29..770b0b2 100644
  #pragma once
  
  // Runtime configuration, loaded from WarbandVR.ini next to the proxy DLL.
-@@ -12,13 +13,76 @@ struct Config
+@@ -12,13 +13,79 @@ struct Config
      float worldScale            = 1.0f;   // metres -> warband units
      int   viewSource            = 0;      // 0 = SetTransform, 1 = VS constant
      int   vsViewRegister        = 0;      // c-register of view(/proj) matrix
@@ -4373,6 +4410,9 @@ index a31ae29..770b0b2 100644
 +                                          // Ex; keep off until slow path works)
 +    bool  mirrorOnDesktop       = false;  // composite SBS to the monitor even
 +                                          // while the XR session runs (spectator)
++    bool  sbsAspectCorrect      = true;   // letterbox per-eye images into the
++                                          // split panels instead of stretching
++                                          // (menus keep their aspect ratio)
 +    bool  forceNoVsync          = true;   // force present-interval immediate when
 +                                          // OutputMode=1 (XR pacing owns the rate)
 +    bool  cinemaMode            = false;  // fixed quad layer instead of immersive
@@ -4423,7 +4463,7 @@ index a31ae29..770b0b2 100644
  
      // [Tracking] (M4; pose source arrives with OpenXR in M3)
      bool  headTracking          = false;
-@@ -27,6 +91,13 @@ struct Config
+@@ -27,6 +94,13 @@ struct Config
      float smoothingBeta         = 0.02f;  // OneEuro speed coefficient
      int   recenterKey           = 0x77;   // VK_F8 default
      bool  lockInMenus           = true;   // freeze tracking when view is static
@@ -4437,7 +4477,7 @@ index a31ae29..770b0b2 100644
  
      // [Camera] (M4 true camera coupling; filled by M0-C)
      char  gameBuild[64]         = "";     // refuse camera writes if mismatch
-@@ -35,6 +106,8 @@ struct Config
+@@ -35,6 +109,8 @@ struct Config
      int   logLevel              = 2;
      int   logViewMatrices       = 25;
      int   captureMode           = 0;      // 0 off, 1 SetTransform, 2 VS consts
@@ -4650,10 +4690,10 @@ index 631bfec..980ca6c 100644
 +#pragma clang diagnostic pop
 +#endif
 diff --git a/src/DeviceHooks.cpp b/src/DeviceHooks.cpp
-index a75bf8b..2e0e75b 100644
+index a75bf8b..5f46334 100644
 --- a/src/DeviceHooks.cpp
 +++ b/src/DeviceHooks.cpp
-@@ -1,84 +1,131 @@
+@@ -1,84 +1,125 @@
 +// SPDX-License-Identifier: GPL-3.0-only
  #include "DeviceHooks.h"
 -#include "VTableHook.h"
@@ -4725,21 +4765,18 @@ index a75bf8b..2e0e75b 100644
 +        dev->GetRenderTarget(0, &savedRT);
 +        dev->GetDepthStencilSurface(&savedDS);
 +
-+        DeviceHooks::Get().m_internal = true;
-+        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0));
-+        DeviceHooks::Get().m_internal = false;
-+        HRESULT hrL = draw();
++        HRESULT hrL, hrR;
++        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0)); }
++        hrL = draw();
++        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1)); }
++        hrR = draw();
 +
-+        DeviceHooks::Get().m_internal = true;
-+        dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1));
-+        DeviceHooks::Get().m_internal = false;
-+        HRESULT hrR = draw();
-+
-+        DeviceHooks::Get().m_internal = true;
-+        dev->SetRenderTarget(0, savedRT);
-+        dev->SetDepthStencilSurface(savedDS);
-+        StereoRenderer::Get().RestoreGameState(dev);
-+        DeviceHooks::Get().m_internal = false;
++        {
++            InternalScope g;
++            dev->SetRenderTarget(0, savedRT);
++            dev->SetDepthStencilSurface(savedDS);
++            StereoRenderer::Get().RestoreGameState(dev);
++        }
 +        if (savedRT) savedRT->Release();
 +        if (savedDS) savedDS->Release();
 +        return FAILED(hrL) ? hrL : hrR;
@@ -4792,28 +4829,34 @@ index a75bf8b..2e0e75b 100644
          QueryPerformanceCounter(&t0);
  
 -        HRESULT hr = S_OK;
+-        DeviceHooks::Get().m_internal = true;
+-        StereoRenderer::Get().ApplyEye(dev, 0);
+-        DeviceHooks::Get().m_internal = false;
+-        hr = draw();
 +        IDirect3DSurface9* savedRT = nullptr;
 +        IDirect3DSurface9* savedDS = nullptr;
 +        dev->GetRenderTarget(0, &savedRT);
 +        dev->GetDepthStencilSurface(&savedDS);
-+
-         DeviceHooks::Get().m_internal = true;
-         StereoRenderer::Get().ApplyEye(dev, 0);
-         DeviceHooks::Get().m_internal = false;
--        hr = draw();
-+        HRESULT hrL = draw();
  
-         DeviceHooks::Get().m_internal = true;
-         StereoRenderer::Get().ApplyEye(dev, 1);
-         DeviceHooks::Get().m_internal = false;
+-        DeviceHooks::Get().m_internal = true;
+-        StereoRenderer::Get().ApplyEye(dev, 1);
+-        DeviceHooks::Get().m_internal = false;
 -        hr = draw();
-+        HRESULT hrR = draw();
++        HRESULT hrL, hrR;
++        { InternalScope g; StereoRenderer::Get().ApplyEye(dev, 0); }
++        hrL = draw();
++        { InternalScope g; StereoRenderer::Get().ApplyEye(dev, 1); }
++        hrR = draw();
  
-         DeviceHooks::Get().m_internal = true;
-+        dev->SetRenderTarget(0, savedRT);
-+        dev->SetDepthStencilSurface(savedDS);
-         StereoRenderer::Get().RestoreGameState(dev);
-         DeviceHooks::Get().m_internal = false;
+-        DeviceHooks::Get().m_internal = true;
+-        StereoRenderer::Get().RestoreGameState(dev);
+-        DeviceHooks::Get().m_internal = false;
++        {
++            InternalScope g;
++            dev->SetRenderTarget(0, savedRT);
++            dev->SetDepthStencilSurface(savedDS);
++            StereoRenderer::Get().RestoreGameState(dev);
++        }
 +        if (savedRT) savedRT->Release();
 +        if (savedDS) savedDS->Release();
 +
@@ -4832,7 +4875,7 @@ index a75bf8b..2e0e75b 100644
  
          QueryPerformanceCounter(&t1);
          LARGE_INTEGER freq;
-@@ -94,47 +141,85 @@ namespace
+@@ -94,92 +135,117 @@ namespace
      }
  }
  
@@ -4869,9 +4912,10 @@ index a75bf8b..2e0e75b 100644
 +    if (DeviceHooks::Get().m_internal) return dev->Present(s, d, w, r);
      if (StereoOn())
      {
-         DeviceHooks::Get().m_internal = true;
+-        DeviceHooks::Get().m_internal = true;
++        InternalScope g;
          StereoRenderer::Get().OnPresent(dev);
-         DeviceHooks::Get().m_internal = false;
+-        DeviceHooks::Get().m_internal = false;
      }
 -    return o_Present(dev, s, d, w, r);
 +    return dev->Present(s, d, w, r);
@@ -4923,13 +4967,14 @@ index a75bf8b..2e0e75b 100644
 +    HRESULT hr = dev->BeginScene();
      if (SUCCEEDED(hr))
      {
-         DeviceHooks::Get().m_internal = true;
+-        DeviceHooks::Get().m_internal = true;
 -        StereoRenderer::Get().OnBeginScene(dev);  // substitute stereo RT0
+-        DeviceHooks::Get().m_internal = false;
++        InternalScope g;
 +        StereoRenderer::Get().OnBeginScene(dev);  // prepare per-eye targets
-         DeviceHooks::Get().m_internal = false;
      }
      return hr;
-@@ -142,44 +227,34 @@ HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
+ }
  
  HRESULT __stdcall hkEndScene(IDirect3DDevice9* dev)
  {
@@ -4940,9 +4985,10 @@ index a75bf8b..2e0e75b 100644
      CameraScan::OnFrame();
 -    StereoRenderer::Get().OnEndScene(dev);
 -    return o_EndScene(dev);
-+    DeviceHooks::Get().m_internal = true;
-+    StereoRenderer::Get().OnEndScene(dev); // may draw the comfort overlay per eye
-+    DeviceHooks::Get().m_internal = false;
++    {
++        InternalScope g;
++        StereoRenderer::Get().OnEndScene(dev); // may draw the comfort overlay per eye
++    }
 +    return dev->EndScene();
  }
  
@@ -4981,17 +5027,15 @@ index a75bf8b..2e0e75b 100644
 -            eyeRects[i].y2 = rects[i].y2;
 -        }
 -        hr = o_Clear(dev, count, eyeRects.data(), flags, color, z, stencil);
-+        DeviceHooks::Get().m_internal = true;
-+        HRESULT hr = StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
-+        DeviceHooks::Get().m_internal = false;
-+        return hr;
++        InternalScope g;
++        return StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
      }
 -    return hr;
 +    return dev->Clear(count, rects, flags, color, z, stencil);
  }
  
  HRESULT __stdcall hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE state, const D3DMATRIX* m)
-@@ -196,7 +271,7 @@ HRESULT __stdcall hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE st
+@@ -196,7 +262,7 @@ HRESULT __stdcall hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE st
                  StereoRenderer::Get().CaptureProjectionMatrix(*m);
          }
      }
@@ -5000,7 +5044,7 @@ index a75bf8b..2e0e75b 100644
  }
  
  HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
-@@ -204,40 +279,76 @@ HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
+@@ -204,40 +270,76 @@ HRESULT __stdcall hkSetViewport(IDirect3DDevice9* dev, const D3DVIEWPORT9* vp)
      // Track the game's intended viewport so ApplyEye derives correct per-eye
      // viewports even when the game changes it mid-frame.
      if (!DeviceHooks::Get().m_internal && vp)
@@ -5037,8 +5081,8 @@ index a75bf8b..2e0e75b 100644
  {
 -    // TODO(M2): per-eye offset when scissor test is enabled.
 -    return o_SetScissorRect(dev, rect);
-+    // Track the game's intended rect; ApplyEye re-applies it per eye with a
-+    // horizontal offset when the scissor test is enabled.
++    // Track the game's intended rect; ApplyEye re-applies it as-is on the
++    // game-sized eye targets (no offset needed there).
 +    if (!DeviceHooks::Get().m_internal && rect)
 +    {
 +        StereoRenderer::Get().SetGameScissorRect(*rect);
@@ -5086,7 +5130,7 @@ index a75bf8b..2e0e75b 100644
  }
  
  HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
-@@ -246,9 +357,9 @@ HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETY
+@@ -246,9 +348,9 @@ HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETY
                                             const void* vertexData, UINT stride)
  {
      if (DeviceHooks::Get().m_internal || !StereoOn())
@@ -5098,7 +5142,7 @@ index a75bf8b..2e0e75b 100644
  }
  
  HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, const float* data, UINT count)
-@@ -259,15 +370,31 @@ HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, co
+@@ -259,15 +361,31 @@ HRESULT __stdcall hkSetVertexShaderConstantF(IDirect3DDevice9* dev, UINT reg, co
      {
          Capture::OnSetVSConstantF(reg, data, count); // M0 tooling (no-op when off)
  
@@ -5133,7 +5177,7 @@ index a75bf8b..2e0e75b 100644
  }
  
  HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9* dev, UINT handle, const float* segs, const D3DRECTPATCH_INFO* info)
-@@ -275,12 +402,12 @@ HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9* dev, UINT handle, const floa
+@@ -275,12 +393,12 @@ HRESULT __stdcall hkDrawRectPatch(IDirect3DDevice9* dev, UINT handle, const floa
      // Patches are essentially unused by Warband; duplicate anyway for safety.
      // (No primitive count available - pass -1 so the UI heuristic never fires.)
      if (DeviceHooks::Get().m_internal || !StereoOn())
@@ -5149,7 +5193,7 @@ index a75bf8b..2e0e75b 100644
  // ---------------------------------------------------------------------------
  DeviceHooks& DeviceHooks::Get()
  {
-@@ -290,48 +417,41 @@ DeviceHooks& DeviceHooks::Get()
+@@ -290,48 +408,41 @@ DeviceHooks& DeviceHooks::Get()
  
  void DeviceHooks::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
  {
@@ -5226,7 +5270,7 @@ index a75bf8b..2e0e75b 100644
 -    LOG_INFO("DeviceHooks: %d/%zu vtable hooks installed on device %p", ok, std::size(hooks), device);
  }
 diff --git a/src/DeviceHooks.h b/src/DeviceHooks.h
-index 96aa5b8..b83f5e3 100644
+index 96aa5b8..ac5ff3b 100644
 --- a/src/DeviceHooks.h
 +++ b/src/DeviceHooks.h
 @@ -1,23 +1,50 @@
@@ -5293,7 +5337,7 @@ index 96aa5b8..b83f5e3 100644
  
  class DeviceHooks
  {
-@@ -27,15 +54,18 @@ public:
+@@ -27,15 +54,31 @@ public:
      void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp);
      void Shutdown();
  
@@ -5315,6 +5359,19 @@ index 96aa5b8..b83f5e3 100644
 -    std::unique_ptr<VTableHook> m_vt;
 -    D3DPRESENT_PARAMETERS m_pp = {};
 +    bool m_curIsRHW = false;
++};
++
++// RAII for the m_internal reentrancy guard. Every detour passes through when
++// the flag is set, so OUR internal D3D calls must run inside one of these
++// scopes. This replaces the previous manual set/clear pairs: a missed reset
++// on any early-return path would silently disable all interception (no
++// error - just a stock-looking frame). Destructor guarantees the reset.
++struct InternalScope
++{
++    InternalScope()  { DeviceHooks::Get().m_internal = true; }
++    ~InternalScope() { DeviceHooks::Get().m_internal = false; }
++    InternalScope(const InternalScope&) = delete;
++    InternalScope& operator=(const InternalScope&) = delete;
  };
 diff --git a/src/DeviceProxy.cpp b/src/DeviceProxy.cpp
 new file mode 100644
@@ -6292,10 +6349,10 @@ index 0000000..373ba18
 +}
 diff --git a/src/GestureZones.h b/src/GestureZones.h
 new file mode 100644
-index 0000000..1227d0d
+index 0000000..f70ac51
 --- /dev/null
 +++ b/src/GestureZones.h
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,37 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#pragma once
 +
@@ -6304,8 +6361,9 @@ index 0000000..1227d0d
 +// unit-tested headless. No Windows/D3D9/XR headers.
 +//
 +// App-space axes: +X right, +Y up, -Z forward (so +dz means BEHIND the
-+// head plane). Distances tuned for an average body; adjustable by gesture
-+// tuning rather than rebuild.
++// head plane). Distances are hardcoded for an average body: tuning means
++// editing these constants and rebuilding (per-controller calibration is a
++// manual-checklist item, not yet an ini surface).
 +
 +#include <cmath>
 +
@@ -6497,10 +6555,10 @@ index f2e43be..b4e2b41 100644
  
 diff --git a/src/Mat4.h b/src/Mat4.h
 new file mode 100644
-index 0000000..6056389
+index 0000000..bb66753
 --- /dev/null
 +++ b/src/Mat4.h
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,171 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#pragma once
 +
@@ -6566,12 +6624,16 @@ index 0000000..6056389
 +    // own symmetric perspective projection. Avoids the toe-in distortion of a
 +    // pure view shift. Falls back to the unmodified matrix for orthographic or
 +    // unrecognised projections (can't shift what we can't parse).
++    // Row-major D3D perspective projection has _34 == 1 and _44 == 0.
++    inline bool IsPerspective(const Mat4& proj)
++    {
++        const float* f = &proj._11;
++        return std::fabs(f[11] - 1.0f) < 1e-3f && std::fabs(f[15]) < 1e-4f;
++    }
++
 +    inline Mat4 EyeProjection(const Mat4& proj, float halfSep, int eye)
 +    {
-+        // Row-major D3D perspective projection has _34 == 1 and _44 == 0.
-+        const float* f = &proj._11;
-+        bool isPerspective = std::fabs(f[11] - 1.0f) < 1e-3f && std::fabs(f[15]) < 1e-4f;
-+        if (!isPerspective)
++        if (!IsPerspective(proj))
 +            return proj; // orthographic or unknown: shift not applicable
 +
 +        // Recover near plane: _33 = f/(f-n) and _43 = -n*_33  =>  n = -_43/_33
@@ -6669,10 +6731,10 @@ index 0000000..6056389
 +    }
 +} // namespace MatPure
 diff --git a/src/MathUtil.h b/src/MathUtil.h
-index 30a3b1c..fef5f5c 100644
+index 30a3b1c..abd32d2 100644
 --- a/src/MathUtil.h
 +++ b/src/MathUtil.h
-@@ -1,115 +1,66 @@
+@@ -1,115 +1,70 @@
 +// SPDX-License-Identifier: GPL-3.0-only
  #pragma once
  
@@ -6804,6 +6866,10 @@ index 30a3b1c..fef5f5c 100644
 -        return r;
 +        return MatToD3D(MatPure::Transpose3x3(MatFromD3D(m)));
 +    }
++    inline bool IsPerspective(const D3DMATRIX& proj)
++    {
++        return MatPure::IsPerspective(MatFromD3D(proj));
++    }
 +    inline bool IsFlatOrtho(const D3DMATRIX& m, float zScaleMax, float wEps, float rowNormMax)
 +    {
 +        return MatPure::IsFlatOrtho(MatFromD3D(m), zScaleMax, wEps, rowNormMax);
@@ -6830,10 +6896,10 @@ index 30a3b1c..fef5f5c 100644
  }
 diff --git a/src/MeleeCore.h b/src/MeleeCore.h
 new file mode 100644
-index 0000000..05eef32
+index 0000000..a58c148
 --- /dev/null
 +++ b/src/MeleeCore.h
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,125 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#pragma once
 +
@@ -6941,7 +7007,11 @@ index 0000000..05eef32
 +        *dx = cx; *dy = cy;
 +    }
 +
-+    // Initial direction delta injected with the attack press (px).
++    // Initial direction delta injected with the attack press (px). This is
++    // Warband's direction-COMMIT distance, deliberately NOT covered by the
++    // SteerDelta clamp: the clamp bounds continuous steering per poll, while
++    // this fixed 80 px nudge is what makes the engine pick the intended
++    // attack direction at press time.
 +    inline void BeginDelta(AttackDir dir, int* dx, int* dy)
 +    {
 +        *dx = 0; *dy = 0;
@@ -7981,10 +8051,10 @@ index c5b7977..917d0bd 100644
          double a = Alpha(cutoff, dt);
          float result = static_cast<float>(a * x + (1.0 - a) * (m_hasLast ? m_xPrev : x));
 diff --git a/src/OpenXRBridge.cpp b/src/OpenXRBridge.cpp
-index 5f504f7..106c510 100644
+index 5f504f7..1cb3ffa 100644
 --- a/src/OpenXRBridge.cpp
 +++ b/src/OpenXRBridge.cpp
-@@ -1,75 +1,888 @@
+@@ -1,75 +1,894 @@
 +// SPDX-License-Identifier: GPL-3.0-only
  #include "OpenXRBridge.h"
 +#include "StereoRenderer.h"
@@ -8009,13 +8079,20 @@ index 5f504f7..106c510 100644
 +// Real implementation (M3). Game-thread-coupled frame loop; see header.
  // ============================================================================
  
++// d3d11.h/dxgi.h MUST precede the OpenXR headers: the Khronos
++// openxr_platform.h includes nothing itself and references ID3D11Device,
++// ID3D11Texture2D, and D3D_FEATURE_LEVEL in the D3D11 binding structs.
++// (Our zig test shim forward-declared those types, which hid this ordering
++// requirement from every headless gate - the first real MSVC OpenXR build
++// failed here.)
++#include <d3d11.h>
++#include <dxgi.h>
++
 +#define XR_USE_PLATFORM_WIN32
 +#define XR_USE_GRAPHICS_API_D3D11
  #include <openxr/openxr.h>
  #include <openxr/openxr_platform.h>
-+
- #include <d3d11.h>
-+#include <dxgi.h>
+-#include <d3d11.h>
 +
 +#include <cstring>
 +#include <cmath>
@@ -8911,7 +8988,7 @@ index 5f504f7..106c510 100644
  // ============================================================================
  
  bool OpenXRBridge::Init(IDirect3DDevice9*)
-@@ -78,13 +891,24 @@ bool OpenXRBridge::Init(IDirect3DDevice9*)
+@@ -78,13 +897,24 @@ bool OpenXRBridge::Init(IDirect3DDevice9*)
      return false;
  }
  
@@ -9030,10 +9107,10 @@ index 2eeee8c..df626b6 100644
  }
 diff --git a/src/ParseUtil.h b/src/ParseUtil.h
 new file mode 100644
-index 0000000..7da1f64
+index 0000000..9650c79
 --- /dev/null
 +++ b/src/ParseUtil.h
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,78 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#pragma once
 +
@@ -9091,14 +9168,29 @@ index 0000000..7da1f64
 +    }
 +
 +    // "x , y , z" -> true and fills out[3]; false if not three floats.
++    // strtof-based: sscanf is C4996-deprecated under MSVC (fatal with
++    // TreatWarningAsError) and sscanf_s doesn't exist on host test builds.
 +    inline bool Vec3(const char* s, float* out)
 +    {
 +        if (!s || !*s) return false;
-+        return sscanf(s, "%f , %f , %f", &out[0], &out[1], &out[2]) == 3;
++        for (int i = 0; i < 3; ++i)
++        {
++            char* end = nullptr;
++            out[i] = strtof(s, &end);
++            if (end == s) return false; // no float here
++            s = end;
++            if (i < 2)
++            {
++                while (*s == ' ') ++s;
++                if (*s != ',') return false;
++                ++s;
++            }
++        }
++        return true;
 +    }
 +}
 diff --git a/src/StereoRenderer.cpp b/src/StereoRenderer.cpp
-index d708385..93e2bf6 100644
+index d708385..d1b8ec9 100644
 --- a/src/StereoRenderer.cpp
 +++ b/src/StereoRenderer.cpp
 @@ -1,11 +1,15 @@
@@ -9322,7 +9414,7 @@ index d708385..93e2bf6 100644
 +        device->SetRenderTarget(0, m_eyeSurf[eye]);
 +        if (m_eyeDS[eye]) device->SetDepthStencilSurface(m_eyeDS[eye]);
 +        device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
-+    }
+     }
 +
 +    device->SetRenderTarget(0, savedRT);
 +    if (savedRT) savedRT->Release();
@@ -9501,7 +9593,7 @@ index d708385..93e2bf6 100644
 +        device->SetRenderTarget(0, m_eyeSurf[eye]);
 +        device->SetDepthStencilSurface(nullptr);
 +        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
-     }
++    }
 +
 +    saved.Restore(device);
  }
@@ -9555,7 +9647,7 @@ index d708385..93e2bf6 100644
  }
  
  void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
-@@ -154,28 +455,110 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
+@@ -154,28 +455,130 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
      if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
          return;
  
@@ -9581,7 +9673,27 @@ index d708385..93e2bf6 100644
 +        D3DSURFACE_DESC srcDesc{};
 +        m_eyeSurf[eye]->GetDesc(&srcDesc);
 +        RECT src = { 0, 0, static_cast<LONG>(srcDesc.Width), static_cast<LONG>(srcDesc.Height) };
-+        RECT dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
++
++        // The game lays out menus and text for the FULL window width. Simply
++        // stretching each full-width eye into its split panel distorts that
++        // UI per panel (the "menu glitch" report). Fit the eye into the
++        // panel while preserving its aspect ratio and letterbox the rest;
++        // SBSAspectCorrect=0 restores the old stretch-to-fill behavior.
++        RECT dst;
++        if (Config::Get().sbsAspectCorrect)
++        {
++            const float sx = static_cast<float>(halfW) / static_cast<float>(srcDesc.Width);
++            const float sy = static_cast<float>(bbH) / static_cast<float>(srcDesc.Height);
++            const float s = sx < sy ? sx : sy;
++            const LONG w = static_cast<LONG>(srcDesc.Width * s + 0.5f);
++            const LONG h = static_cast<LONG>(srcDesc.Height * s + 0.5f);
++            const LONG x0 = eye * halfW + (halfW - w) / 2;
++            const LONG y0 = (bbH - h) / 2;
++            dst = { x0, y0, x0 + w, y0 + h };
++        }
++        else
++            dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
++
 +        // D3DTEXF_NONE keeps this legal for equal-format surfaces.
 +        device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
 +    }
@@ -9680,7 +9792,7 @@ index d708385..93e2bf6 100644
  void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  {
      // Menu-lock bookkeeping: note when the view last actually changed.
-@@ -184,9 +567,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
+@@ -184,9 +587,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  
      m_baseView = m;
      m_hasView  = true;
@@ -9692,7 +9804,7 @@ index d708385..93e2bf6 100644
      {
          char buf[640];
          Mat::Format(m, buf, sizeof(buf));
-@@ -207,7 +591,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
+@@ -207,7 +611,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
      m_hasGameVp = true;
  }
  
@@ -9712,7 +9824,7 @@ index d708385..93e2bf6 100644
  
  void StereoRenderer::CheckRecenterKey()
  {
-@@ -216,7 +611,10 @@ void StereoRenderer::CheckRecenterKey()
+@@ -216,7 +631,10 @@ void StereoRenderer::CheckRecenterKey()
  
      bool down = (GetAsyncKeyState(cfg.recenterKey) & 0x8000) != 0;
      if (down && !m_recenterKeyDown)
@@ -9724,7 +9836,7 @@ index d708385..93e2bf6 100644
      m_recenterKeyDown = down;
  }
  
-@@ -246,32 +644,73 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
+@@ -246,32 +664,84 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
      return Mat::Multiply(Mat::Multiply(rt, tInv), view);
  }
  
@@ -9785,9 +9897,14 @@ index d708385..93e2bf6 100644
 -    // M4: head pose delta composes onto the captured view first.
 -    D3DMATRIX headView = ApplyHeadDelta(m_baseView);
 -    D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
-+    // Samplers bound to a shadowed surface get this eye's copy (M2).
-+    for (const auto& bind : m_shadowBinds)
-+        device->SetTexture(bind.first, bind.second->eyeTex[eye]);
++    // Samplers bound to the ACTIVE shadow pass's surface get this eye's copy
++    // (M2). ONLY during that pass: applying these binds to later main-scene
++    // draws would leak offscreen content into unrelated geometry (an
++    // offscreen animal portrait could end up on the ocean).
++    if (m_shadowActive)
++        for (const auto& bind : m_shadowBinds)
++            if (bind.second == m_shadowActive)
++                device->SetTexture(bind.first, bind.second->eyeTex[eye]);
 +
 +    if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
 +
@@ -9798,18 +9915,24 @@ index d708385..93e2bf6 100644
 +        // M4: head pose delta composes onto the captured view first.
 +        D3DMATRIX headView = ApplyHeadDelta(m_baseView);
 +
-+        // UI passes use an orthographic projection (tiny z-scale, w == 1).
-+        // Stereo-shifting those misaligns text against flat-drawn boxes, so
-+        // draw them flat (identical in both eyes). 3D view/world matrices are
-+        // orthonormal (|_33| ~ 1); viewproj matrices are non-affine.
-+        const bool flatUI = Mat::IsFlatOrtho(headView, cfg.uiZScaleMax, cfg.uiWScaleEps,
-+                                             cfg.uiRowNormMax);
++        // Fixed-function UI is often drawn with an IDENTITY view matrix and
++        // an orthographic projection. A view-matrix-only classifier cannot
++        // see that case: identity is a valid 3D view, so it was eye-shifted,
++        // and under an ortho projection a view translation is a pure
++        // screen-space offset - dialog text moved relative to backgrounds
++        // that the flat path drew correctly (the encounter-dialog layout
++        // bug). Gate on the PROJECTION type instead: only perspective scenes
++        // get the eye view shift; orthographic/2D projections stay flat in
++        // both eyes. With no projection captured yet, keep the old heuristic.
++        const bool flatUI = m_hasProj
++            ? !Mat::IsPerspective(m_baseProj)
++            : Mat::IsFlatOrtho(headView, cfg.uiZScaleMax, cfg.uiWScaleEps, cfg.uiRowNormMax);
 +        D3DMATRIX eyeView  = flatUI ? headView : Mat::EyeView(headView, halfSep, eye);
 +
          // Fixed-function path: overwrite the VIEW transform for this eye.
          device->SetTransform(D3DTS_VIEW, &eyeView);
  
-@@ -284,19 +723,69 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
+@@ -284,19 +754,74 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
      }
      else
      {
@@ -9872,9 +9995,14 @@ index d708385..93e2bf6 100644
          device->SetViewport(&m_gameVp);
 +    if (m_scissorEnabled && m_hasScissor)
 +        device->SetScissorRect(&m_gameScissor);
-+    for (const auto& bind : m_shadowBinds)
-+        device->SetTexture(bind.first, bind.second->gameTex ? bind.second->gameTex
-+                                                            : bind.second->eyeTex[0]);
++    // Restore the game's own texture for the ACTIVE shadow's stages only.
++    // Every bind in m_shadowBinds has gameTex set at creation, so there is
++    // no legitimate fallback to an eye copy - substituting one would leak
++    // our render into the game's subsequent draws.
++    if (m_shadowActive)
++        for (const auto& bind : m_shadowBinds)
++            if (bind.second == m_shadowActive && bind.second->gameTex)
++                device->SetTexture(bind.first, bind.second->gameTex);
 +    if (m_uploadedThisPair && Config::Get().viewSource == 1)
 +    {
 +        // Put the game's own register back exactly as we found it.
@@ -9885,7 +10013,7 @@ index d708385..93e2bf6 100644
      if (m_hasView && Config::Get().viewSource == 0)
          device->SetTransform(D3DTS_VIEW, &m_baseView);
      if (m_hasProj && Config::Get().asymmetricProjection && Config::Get().viewSource == 0)
-@@ -308,3 +797,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
+@@ -308,3 +833,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
      m_dupTimeUs += microseconds;
      m_dupCalls  += drawCalls;
  }
@@ -10581,10 +10709,10 @@ index ea1c501..96de556 100644
          StereoRenderer::Get().Shutdown();
 diff --git a/tests/fake_device.cpp b/tests/fake_device.cpp
 new file mode 100644
-index 0000000..59a622d
+index 0000000..e6bcfff
 --- /dev/null
 +++ b/tests/fake_device.cpp
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,248 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#include "fake_device.h"
 +#include <cstdarg>
@@ -10757,6 +10885,7 @@ index 0000000..59a622d
 +HRESULT __stdcall FakeDevice::SetTexture(DWORD stage, IDirect3DBaseTexture9* t)
 +{
 +    if (stage < 16) textures[stage] = t;
++    Fake::Recordf("SetTexture %u=%p", (unsigned)stage, (void*)t);
 +    return S_OK;
 +}
 +HRESULT __stdcall FakeDevice::SetRenderState(D3DRENDERSTATETYPE st, DWORD v)
@@ -10822,9 +10951,11 @@ index 0000000..59a622d
 +}
 +
 +HRESULT __stdcall FakeDevice::StretchRect(IDirect3DSurface9*, const RECT*, IDirect3DSurface9*,
-+                                          const RECT*, D3DTEXTUREFILTERTYPE)
++                                          const RECT* d, D3DTEXTUREFILTERTYPE)
 +{
-+    Fake::Record("StretchRect"); return S_OK;
++    if (d) Fake::Recordf("StretchRect dst=%ld,%ld,%ld,%ld", d->left, d->top, d->right, d->bottom);
++    else   Fake::Record("StretchRect");
++    return S_OK;
 +}
 +HRESULT __stdcall FakeDevice::GetRenderTargetData(IDirect3DSurface9*, IDirect3DSurface9*)
 +{
@@ -11778,10 +11909,10 @@ index 0000000..9b5847d
 +}
 diff --git a/tests/test_integration.cpp b/tests/test_integration.cpp
 new file mode 100644
-index 0000000..992108b
+index 0000000..83244c2
 --- /dev/null
 +++ b/tests/test_integration.cpp
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,427 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// Headless integration tests: real DeviceHooks + StereoRenderer + Config +
 +// Logger compiled against the winshim, driven through a recording FakeDevice.
@@ -11955,6 +12086,31 @@ index 0000000..992108b
 +          Fake::CountContaining("SetTransform", "_41=-0.0320") > 0); // still shifted
 +    hkSetTransform(&dev, D3DTS_VIEW, &view); // back to the plain view
 +
++    // --- encounter-dialog layout: identity view + ORTHO projection ---------
++    // A large batch (so the tiny-batch flat path does not apply) must NOT be
++    // eye-shifted: under an ortho projection a view translation is a pure
++    // screen-space offset and moves text relative to flat backgrounds.
++    D3DMATRIX ortho = {};
++    ortho._11 = 2.0f / 1024.0f; ortho._22 = -2.0f / 768.0f;
++    ortho._33 = 0.001f; ortho._41 = -1.0f; ortho._42 = 1.0f; ortho._44 = 1.0f;
++    hkSetTransform(&dev, D3DTS_PROJECTION, &ortho);
++    D3DMATRIX identity = IdentityM();
++    hkSetTransform(&dev, D3DTS_VIEW, &identity);
++    Fake::Clear();
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
++    CHECK(Fake::Count("DrawPrimitive") == 2);
++    CHECK(Fake::CountContaining("SetTransform", "_41=0.0000") == Fake::Count("SetTransform"));
++
++    // ... and the same identity view under a PERSPECTIVE projection shifts.
++    D3DMATRIX persp = {};
++    persp._11 = 1.0f; persp._22 = 1.0f; persp._33 = 2.0f;
++    persp._34 = 1.0f; persp._43 = -0.2f; persp._44 = 0.0f;
++    hkSetTransform(&dev, D3DTS_PROJECTION, &persp);
++    Fake::Clear();
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
++    CHECK(Fake::CountContaining("SetTransform", "_41=0.0320") > 0 ||
++          Fake::CountContaining("SetTransform", "_41=-0.0320") > 0);
++
 +    // --- game's own offscreen RT passes through untouched -----------------
 +    Fake::Clear();
 +    FakeSurface shadowMap(256, 256);
@@ -12031,6 +12187,10 @@ index 0000000..992108b
 +    Fake::Clear();
 +    hkPresent(&dev, nullptr, nullptr, nullptr, nullptr);
 +    CHECK(Fake::Count("StretchRect") == 2);
++    // Aspect-correct composite: 1600x900 eyes fit into 800x900 panels as
++    // 800x450 images, centered vertically (no UI distortion).
++    CHECK(Fake::CountContaining("StretchRect", "dst=0,225,800,675") > 0);
++    CHECK(Fake::CountContaining("StretchRect", "dst=800,225,1600,675") > 0);
 +    CHECK(Fake::Count("Present") == 1);
 +    CHECK(!StereoRenderer::Get().IsActive());
 +
@@ -12094,6 +12254,25 @@ index 0000000..992108b
 +    CHECK(Fake::Count("DrawPrimitive") == 2);
 +    hkSetRenderTarget(&dev, 0, bb);
 +    CHECK(!StereoRenderer::Get().ShadowActive());
++
++    // --- shadow texture binds must NOT leak into main-scene draws ---------
++    // Regression: an offscreen "cow" texture would otherwise be substituted
++    // into later main-scene draws (e.g. the ocean).
++    IDirect3DTexture9* cowTex = nullptr;
++    dev.CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8,
++                      D3DPOOL_DEFAULT, &cowTex, nullptr);
++    IDirect3DSurface9* cowSurf = nullptr;
++    cowTex->GetSurfaceLevel(0, &cowSurf);
++    hkSetRenderTarget(&dev, 0, cowSurf);       // activate a shadow pass
++    hkSetTexture(&dev, 0, cowTex);             // stage 0 samples that surface
++    Fake::Clear();
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 65);
++    CHECK(dev.textures[0] == cowTex);          // game's texture restored
++    hkSetRenderTarget(&dev, 0, bb);             // pass ends
++    Fake::Clear();
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 65);
++    CHECK(Fake::Count("SetTexture 0") == 0);    // no substitution on main scene
++    CHECK(dev.textures[0] == cowTex);
 +    Config::Get().offscreenPasses = false;
 +
 +    // --- Reset releases DEFAULT-pool eyes, then rebuilds at the new size ----
@@ -12163,10 +12342,10 @@ index 0000000..992108b
 +}
 diff --git a/tests/test_main.cpp b/tests/test_main.cpp
 new file mode 100644
-index 0000000..d1c5a8d
+index 0000000..9658bf8
 --- /dev/null
 +++ b/tests/test_main.cpp
-@@ -0,0 +1,502 @@
+@@ -0,0 +1,512 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// WarbandVR headless unit tests - pure logic only (no Windows/D3D9/XR).
 +// Build:  g++ -std=c++17 -Wall -Wextra -I../src test_main.cpp -o run_tests
@@ -12348,6 +12527,15 @@ index 0000000..d1c5a8d
 +        }
 +        }
 +    }
++}
++
++static void TestIsPerspective()
++{
++    CHECK(MatPure::IsPerspective(TestProj()));
++    Mat4 ortho = MatPure::Identity();
++    ortho._33 = 0.001f; ortho._34 = 0.0f; // _44 = 1 from Identity
++    CHECK(!MatPure::IsPerspective(ortho));
++    CHECK(!MatPure::IsPerspective(MatPure::Identity()));
 +}
 +
 +static void TestEyeProjection()
@@ -12652,6 +12840,7 @@ index 0000000..d1c5a8d
 +    TestEyeView();
 +    TestIsPlausibleTransform();
 +    TestIsFlatOrtho();
++    TestIsPerspective();
 +    TestClassifierFuzz();
 +    TestEyeProjection();
 +    TestRotationTranspose();

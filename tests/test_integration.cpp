@@ -171,6 +171,31 @@ int main()
           Fake::CountContaining("SetTransform", "_41=-0.0320") > 0); // still shifted
     hkSetTransform(&dev, D3DTS_VIEW, &view); // back to the plain view
 
+    // --- encounter-dialog layout: identity view + ORTHO projection ---------
+    // A large batch (so the tiny-batch flat path does not apply) must NOT be
+    // eye-shifted: under an ortho projection a view translation is a pure
+    // screen-space offset and moves text relative to flat backgrounds.
+    D3DMATRIX ortho = {};
+    ortho._11 = 2.0f / 1024.0f; ortho._22 = -2.0f / 768.0f;
+    ortho._33 = 0.001f; ortho._41 = -1.0f; ortho._42 = 1.0f; ortho._44 = 1.0f;
+    hkSetTransform(&dev, D3DTS_PROJECTION, &ortho);
+    D3DMATRIX identity = IdentityM();
+    hkSetTransform(&dev, D3DTS_VIEW, &identity);
+    Fake::Clear();
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
+    CHECK(Fake::Count("DrawPrimitive") == 2);
+    CHECK(Fake::CountContaining("SetTransform", "_41=0.0000") == Fake::Count("SetTransform"));
+
+    // ... and the same identity view under a PERSPECTIVE projection shifts.
+    D3DMATRIX persp = {};
+    persp._11 = 1.0f; persp._22 = 1.0f; persp._33 = 2.0f;
+    persp._34 = 1.0f; persp._43 = -0.2f; persp._44 = 0.0f;
+    hkSetTransform(&dev, D3DTS_PROJECTION, &persp);
+    Fake::Clear();
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
+    CHECK(Fake::CountContaining("SetTransform", "_41=0.0320") > 0 ||
+          Fake::CountContaining("SetTransform", "_41=-0.0320") > 0);
+
     // --- game's own offscreen RT passes through untouched -----------------
     Fake::Clear();
     FakeSurface shadowMap(256, 256);
@@ -247,6 +272,10 @@ int main()
     Fake::Clear();
     hkPresent(&dev, nullptr, nullptr, nullptr, nullptr);
     CHECK(Fake::Count("StretchRect") == 2);
+    // Aspect-correct composite: 1600x900 eyes fit into 800x900 panels as
+    // 800x450 images, centered vertically (no UI distortion).
+    CHECK(Fake::CountContaining("StretchRect", "dst=0,225,800,675") > 0);
+    CHECK(Fake::CountContaining("StretchRect", "dst=800,225,1600,675") > 0);
     CHECK(Fake::Count("Present") == 1);
     CHECK(!StereoRenderer::Get().IsActive());
 
@@ -310,6 +339,25 @@ int main()
     CHECK(Fake::Count("DrawPrimitive") == 2);
     hkSetRenderTarget(&dev, 0, bb);
     CHECK(!StereoRenderer::Get().ShadowActive());
+
+    // --- shadow texture binds must NOT leak into main-scene draws ---------
+    // Regression: an offscreen "cow" texture would otherwise be substituted
+    // into later main-scene draws (e.g. the ocean).
+    IDirect3DTexture9* cowTex = nullptr;
+    dev.CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8,
+                      D3DPOOL_DEFAULT, &cowTex, nullptr);
+    IDirect3DSurface9* cowSurf = nullptr;
+    cowTex->GetSurfaceLevel(0, &cowSurf);
+    hkSetRenderTarget(&dev, 0, cowSurf);       // activate a shadow pass
+    hkSetTexture(&dev, 0, cowTex);             // stage 0 samples that surface
+    Fake::Clear();
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 65);
+    CHECK(dev.textures[0] == cowTex);          // game's texture restored
+    hkSetRenderTarget(&dev, 0, bb);             // pass ends
+    Fake::Clear();
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 65);
+    CHECK(Fake::Count("SetTexture 0") == 0);    // no substitution on main scene
+    CHECK(dev.textures[0] == cowTex);
     Config::Get().offscreenPasses = false;
 
     // --- Reset releases DEFAULT-pool eyes, then rebuilds at the new size ----

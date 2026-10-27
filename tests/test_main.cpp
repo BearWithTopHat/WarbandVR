@@ -181,6 +181,15 @@ static void TestClassifierFuzz()
     }
 }
 
+static void TestIsPerspective()
+{
+    CHECK(MatPure::IsPerspective(TestProj()));
+    Mat4 ortho = MatPure::Identity();
+    ortho._33 = 0.001f; ortho._34 = 0.0f; // _44 = 1 from Identity
+    CHECK(!MatPure::IsPerspective(ortho));
+    CHECK(!MatPure::IsPerspective(MatPure::Identity()));
+}
+
 static void TestEyeProjection()
 {
     Mat4 p = TestProj();
@@ -483,6 +492,7 @@ int main()
     TestEyeView();
     TestIsPlausibleTransform();
     TestIsFlatOrtho();
+    TestIsPerspective();
     TestClassifierFuzz();
     TestEyeProjection();
     TestRotationTranspose();
