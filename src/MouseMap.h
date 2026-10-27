@@ -50,5 +50,8 @@ namespace MouseMap
 
     // Installs the WH_GETMESSAGE remap on the window's thread. Idempotent.
     void Install(void* gameWindow);
+    // IAT-hooks the polling path (user32!ScreenToClient) - Warband reads the
+    // cursor position by polling, not from WM_* messages.
+    void InstallPollingHooks();
     void Uninstall();
 }
