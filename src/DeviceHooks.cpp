@@ -27,10 +27,26 @@ namespace
         dev->GetRenderTarget(0, &savedRT);
         dev->GetDepthStencilSurface(&savedDS);
 
+        // D3D9 resets the viewport to the full new target on SetRenderTarget.
+        // Dialog panels are drawn into sub-viewports (e.g. the encounter
+        // dialog's option band), so the game's viewport must be re-applied
+        // after each target swap or panel content smears across the screen.
+        D3DVIEWPORT9 vp{};
+        const bool hasVp = StereoRenderer::Get().HasGameViewport();
+        if (hasVp) vp = StereoRenderer::Get().GameViewport();
+
         HRESULT hrL, hrR;
-        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0)); }
+        {
+            InternalScope g;
+            dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(0));
+            if (hasVp) dev->SetViewport(&vp);
+        }
         hrL = draw();
-        { InternalScope g; dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1)); }
+        {
+            InternalScope g;
+            dev->SetRenderTarget(0, StereoRenderer::Get().EyeSurface(1));
+            if (hasVp) dev->SetViewport(&vp);
+        }
         hrR = draw();
 
         {

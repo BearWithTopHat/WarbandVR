@@ -79,6 +79,8 @@ public:
 
     // Game viewport tracking (fed by hkSetViewport when not internal)
     void SetGameViewport(const D3DVIEWPORT9& vp);
+    bool HasGameViewport() const { return m_hasGameVp; }
+    const D3DVIEWPORT9& GameViewport() const { return m_gameVp; }
 
     // Scissor tracking: the game's scissor rect is stored and re-applied per
     // eye (each eye target is game-sized, so it is used as-is).
