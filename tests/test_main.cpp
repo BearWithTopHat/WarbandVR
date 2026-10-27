@@ -12,6 +12,7 @@
 #include "ParseUtil.h"
 #include "OneEuroFilter.h"
 #include "Comfort.h"
+#include "MouseMap.h"
 
 #include <cstdio>
 #include <cmath>
@@ -463,6 +464,31 @@ static void TestOneEuro()
 // Comfort policy / radial vignette
 // ---------------------------------------------------------------------------
 
+static void TestMouseMap()
+{
+    // 1600x900 window -> two 800x900 panels, eyes 1600x900, aspect-correct.
+    // Fit is scale 0.5, left panel at (0,225), right at (800,225).
+    long lx = 0, ly = 0;
+    MouseMap::ClientToLogical(0, 100, 300, 800, 900, 1600, 900, true, &lx, &ly);
+    CHECK(lx == 200 && ly == 150);           // (100/0.5, (300-225)/0.5)
+    MouseMap::ClientToLogical(1, 900, 300, 800, 900, 1600, 900, true, &lx, &ly);
+    CHECK(lx == 200 && ly == 150);           // same logical point on right eye
+
+    // Center of the left panel's menu area maps back to logical center.
+    MouseMap::ClientToLogical(0, 400, 450, 800, 900, 1600, 900, true, &lx, &ly);
+    CHECK(lx == 800 && ly == 450);
+
+    // Stretch-to-fill mapping: x halves, y unchanged.
+    MouseMap::ClientToLogical(0, 100, 300, 800, 900, 1600, 900, false, &lx, &ly);
+    CHECK(lx == 200 && ly == 300);
+    MouseMap::ClientToLogical(1, 900, 300, 800, 900, 1600, 900, false, &lx, &ly);
+    CHECK(lx == 200 && ly == 300);
+
+    // Off-panel positions map outside the logical window (no false hover).
+    MouseMap::ClientToLogical(0, 10, 10, 800, 900, 1600, 900, true, &lx, &ly);
+    CHECK(ly < 0); // above the letterboxed image
+}
+
 static void TestComfort()
 {
     float scale = 0.0f;
@@ -505,6 +531,7 @@ int main()
     TestGestureZones();
     TestParse();
     TestOneEuro();
+    TestMouseMap();
     TestComfort();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);

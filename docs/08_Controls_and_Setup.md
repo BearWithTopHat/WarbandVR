@@ -37,6 +37,8 @@
 | OutputMode | 0 | 0 = SBS on monitor, 1 = OpenXR headset. |
 | SharedSurface | 0 | Fast GPU handoff (D3D9Ex). Try slow path first. |
 | MirrorOnDesktop | 0 | Spectator SBS on the monitor while in VR. |
+| SBSAspectCorrect | 1 | Letterbox per-eye images into split panels (preserves menu proportions); 0 = stretch to fill. |
+| SBSMouseRemap | 1 | Remap split-panel cursor coords to the game's full-window logical space (correct hover/click targets). |
 | ForceNoVsync | 1 | Force present-interval immediate under OutputMode=1. |
 | CinemaMode | 0 | Fixed quad "diorama" display instead of immersive projection. Pair with HeadTracking=0. |
 | FramePacing | 0 | 0 = xrWaitFrame paces the game thread; 1 = free-run, XR gets one frame per display period. Try 1 for periodic stutter. |

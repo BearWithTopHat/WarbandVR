@@ -94,6 +94,17 @@ Check in order:
 5. Slow path first: `SharedSurface=0`.
 6. Steam Link streaming already works for the flat game.
 
+### A menu item highlights even when the cursor is outside it
+
+That's a cursor-coordinate mismatch, not a rendering bug: the game hit-tests
+in full-window coordinates while the cursor arrives in split-panel
+coordinates. The new SBS mouse remap (`[Output] SBSMouseRemap=1`, default on)
+converts panel coordinates into the game's logical space using the exact
+inverse of the composite transform, so hover and clicks land on the intended
+item. It only applies to SBS output (OutputMode=0); OpenXR presentation is
+unaffected. If a menu still misbehaves with it on, try SBSMouseRemap=0 and
+report which input path your Warband build uses.
+
 ### SBS menu looks distorted or laid out for the full window
 
 The game always lays out menus and text for the **full window width** — a

@@ -13,7 +13,7 @@ echo "== integration tests (fake device, real hooks + renderer)"
 g++ -std=c++17 -Wall -Wextra -Werror -Itests/winshim -Itests -Isrc \
     tests/test_integration.cpp tests/fake_device.cpp tests/winshim_impl.cpp \
     src/Logger.cpp src/Config.cpp src/Capture.cpp src/CameraScan.cpp \
-    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp \
+    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp src/MouseMap.cpp \
     -o tests/run_integration
 ./tests/run_integration
 
@@ -21,7 +21,7 @@ echo "== reset/robustness fuzzing (random calls + injected HRESULT failures)"
 g++ -std=c++17 -Wall -Wextra -Werror -Itests/winshim -Itests -Isrc \
     tests/test_fuzz.cpp tests/fake_device.cpp tests/winshim_impl.cpp \
     src/Logger.cpp src/Config.cpp src/Capture.cpp src/CameraScan.cpp \
-    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp \
+    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp src/MouseMap.cpp \
     -o tests/run_fuzz
 ./tests/run_fuzz
 

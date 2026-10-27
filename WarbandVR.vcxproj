@@ -145,6 +145,7 @@
     <ClCompile Include="src\CameraScan.cpp" />
     <ClCompile Include="src\OpenXRBridge.cpp" />
     <ClCompile Include="src\MotionInput.cpp" />
+    <ClCompile Include="src\MouseMap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Logger.h" />
@@ -167,6 +168,7 @@
     <ClInclude Include="src\Comfort.h" />
     <ClInclude Include="src\OpenXRBridge.h" />
     <ClInclude Include="src\MotionInput.h" />
+    <ClInclude Include="src\MouseMap.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="WarbandVR.def" />

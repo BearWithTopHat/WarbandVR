@@ -39,6 +39,9 @@ struct Config
     bool  sbsAspectCorrect      = true;   // letterbox per-eye images into the
                                           // split panels instead of stretching
                                           // (menus keep their aspect ratio)
+    bool  sbsMouseRemap         = true;   // remap cursor coords to the game's
+                                          // full-window logical space (fixes
+                                          // hover/hit-test in split panels)
     bool  forceNoVsync          = true;   // force present-interval immediate when
                                           // OutputMode=1 (XR pacing owns the rate)
     bool  cinemaMode            = false;  // fixed quad layer instead of immersive

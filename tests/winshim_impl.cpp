@@ -172,3 +172,12 @@ BOOL MoveFileExA(LPCSTR from, LPCSTR to, DWORD) {
     return std::rename(HostPath(from).c_str(), HostPath(to).c_str()) == 0 ? 1 : 0;
 }
 }
+
+// MouseMap hook stubs: no real message pump in headless tests.
+extern "C" {
+HHOOK SetWindowsHookExA(int, LRESULT (__stdcall *)(int, WPARAM, LPARAM), HMODULE, DWORD) { return (HHOOK)0xBEEF; }
+BOOL UnhookWindowsHookEx(HHOOK) { return 1; }
+LRESULT CallNextHookEx(HHOOK, int, WPARAM, LPARAM) { return 0; }
+DWORD GetWindowThreadProcessId(HWND, DWORD*) { return 1; }
+BOOL GetClientRect(HWND, RECT* rc) { rc->left = rc->top = 0; rc->right = 1600; rc->bottom = 900; return 1; }
+}

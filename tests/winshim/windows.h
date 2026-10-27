@@ -50,6 +50,7 @@ typedef int32_t     errno_t;
 #define __stdcall
 #define __cdecl
 #define WINAPI __stdcall
+#define CALLBACK __stdcall
 #define __forceinline inline
 #define WIN32_LEAN_AND_MEAN
 // Host shim: use an object pointer so production reinterpret_casts to each
@@ -225,6 +226,36 @@ typedef struct _IMAGE_NT_HEADERS {
 } IMAGE_NT_HEADERS;
 #define IMAGE_FIRST_SECTION(h) ((h)->sections)
 #define IMAGE_SCN_CNT_INITIALIZED_DATA 0x40
+
+// message-hook surface for MouseMap
+typedef void* HHOOK;
+typedef uintptr_t WPARAM;
+typedef intptr_t  LPARAM;
+typedef intptr_t  LRESULT;
+typedef struct tagMSG { HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam; DWORD time; POINT pt; } MSG;
+#define WH_GETMESSAGE 3
+#define HC_ACTION 0
+#define WM_MOUSEMOVE     0x0200
+#define WM_LBUTTONDOWN   0x0201
+#define WM_LBUTTONUP     0x0202
+#define WM_LBUTTONDBLCLK 0x0203
+#define WM_RBUTTONDOWN   0x0204
+#define WM_RBUTTONUP     0x0205
+#define WM_RBUTTONDBLCLK 0x0206
+#define WM_MBUTTONDOWN   0x0207
+#define WM_MBUTTONUP     0x0208
+#define WM_MBUTTONDBLCLK 0x0209
+#define LOWORD(l) ((WORD)((uintptr_t)(l) & 0xffff))
+#define HIWORD(l) ((WORD)(((uintptr_t)(l) >> 16) & 0xffff))
+#define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
+#define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
+extern "C" {
+HHOOK SetWindowsHookExA(int, LRESULT (__stdcall *)(int, WPARAM, LPARAM), HMODULE, DWORD);
+BOOL UnhookWindowsHookEx(HHOOK);
+LRESULT CallNextHookEx(HHOOK, int, WPARAM, LPARAM);
+DWORD GetWindowThreadProcessId(HWND, DWORD*);
+BOOL GetClientRect(HWND, RECT*);
+}
 
 #define IMAGE_DOS_SIGNATURE 0x5A4D
 typedef IMAGE_NT_HEADERS IMAGE_NT_HEADERS32;

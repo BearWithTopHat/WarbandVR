@@ -7,6 +7,7 @@
 #include "OpenXRBridge.h"
 #include "OneEuroFilter.h"
 #include "Comfort.h"
+#include "MouseMap.h"
 
 #include <cstring>
 #include <algorithm>
@@ -27,7 +28,14 @@ void StereoRenderer::OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_
     if (m_qpcFreq.QuadPart == 0) QueryPerformanceFrequency(&m_qpcFreq);
     ReleaseResources();
     if (Config::Get().enableStereo)
+    {
         CreateResources(device);
+        // Cursor coordinates must match the composite transform or menu
+        // hit-tests land on the wrong item (Options hover outside the menu).
+        if (Config::Get().outputMode == 0 && Config::Get().sbsMouseRemap &&
+            pp && pp->hDeviceWindow)
+            MouseMap::Install(pp->hDeviceWindow);
+    }
 }
 
 void StereoRenderer::OnReset(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
@@ -42,6 +50,7 @@ void StereoRenderer::OnReset(IDirect3DDevice9* device, const D3DPRESENT_PARAMETE
 
 void StereoRenderer::Shutdown()
 {
+    MouseMap::Uninstall();
     ReleaseResources();
     m_active = false;
 }

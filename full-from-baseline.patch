@@ -581,7 +581,7 @@ index 9d5f95c..f5919f1 100644
 +Behavior changes require matching test updates. Do not weaken tests to make a
 +change pass.
 diff --git a/WarbandVR.ini b/WarbandVR.ini
-index 90469af..2d79e5a 100644
+index 90469af..7533bb0 100644
 --- a/WarbandVR.ini
 +++ b/WarbandVR.ini
 @@ -15,9 +15,10 @@ EnableStereo=0
@@ -597,7 +597,7 @@ index 90469af..2d79e5a 100644
  
  ; Where the per-frame view matrix comes from. SET THIS FROM M0 CAPTURE RESULTS.
  ;   0 = fixed-function SetTransform(D3DTS_VIEW)   (try this first)
-@@ -27,24 +28,83 @@ ViewSource=0
+@@ -27,24 +28,87 @@ ViewSource=0
  ; Vertex shader register (float4 x4) holding the VIEW or VIEWPROJ matrix,
  ; used when ViewSource=1. Found during milestone M0 (docs/04).
  VSViewRegister=0
@@ -664,6 +664,10 @@ index 90469af..2d79e5a 100644
 +; it into its split panel (menus and text keep their proportions). 0 restores
 +; the old behavior of stretching each eye to fill the panel.
 +SBSAspectCorrect=1
++; SBS mouse remap: converts split-panel cursor coordinates into the game's
++; full-window logical coordinates so hover and clicks hit the intended menu
++; items. Disable only if your input path behaves oddly (then report it).
++SBSMouseRemap=1
 +; Force the game's present interval to immediate when OutputMode=1 - XR frame
 +; pacing (xrWaitFrame) owns the rate; vsync would fight it and can halve the
 +; per-eye throughput. Keep 1 unless diagnosing pacing issues.
@@ -686,7 +690,7 @@ index 90469af..2d79e5a 100644
  [Tracking]
  ; M4 head tracking. Requires the OpenXR pose source (M3) to exist; until then
  ; these are plumbed but inert.
-@@ -57,10 +117,102 @@ RecenterKey=0x77
+@@ -57,10 +121,102 @@ RecenterKey=0x77
  ; Freeze tracking when the camera has been static for 250ms (menus/map).
  LockInMenus=1
  
@@ -790,7 +794,7 @@ index 90469af..2d79e5a 100644
  
  [Debug]
  ; 0 = errors only, 1 = +warnings, 2 = +info, 3 = verbose (slow, big logs)
-@@ -73,6 +225,7 @@ LogViewMatrices=25
+@@ -73,6 +229,7 @@ LogViewMatrices=25
  ;   0 = off
  ;   1 = per-frame summary of SetTransform VIEW/PROJECTION activity
  ;   2 = per-frame ranking of shader registers holding matrix-like data
@@ -798,7 +802,7 @@ index 90469af..2d79e5a 100644
  CaptureMode=0
  
  ; M0 memory scanner (docs/04 part C). Set ExpectedPos to a position you are
-@@ -83,3 +236,8 @@ ExpectedPos=
+@@ -83,3 +240,8 @@ ExpectedPos=
  ; Optional manual range override (hex). Default = the exe's .data section.
  ScanBase=0x0
  ScanSize=0x0
@@ -828,7 +832,7 @@ index 5c141c5..e5ceb24 100644
  	GlobalSection(SolutionProperties) = preSolution
  		HideSolutionNode = FALSE
 diff --git a/WarbandVR.vcxproj b/WarbandVR.vcxproj
-index 5298d47..fd9f60a 100644
+index 5298d47..3e4a68b 100644
 --- a/WarbandVR.vcxproj
 +++ b/WarbandVR.vcxproj
 @@ -9,6 +9,10 @@
@@ -919,7 +923,7 @@ index 5298d47..fd9f60a 100644
      </Link>
    </ItemDefinitionGroup>
    <ItemGroup>
-@@ -91,26 +137,36 @@
+@@ -91,26 +137,38 @@
      <ClCompile Include="src\Logger.cpp" />
      <ClCompile Include="src\Config.cpp" />
      <ClCompile Include="src\D3D9Proxy.cpp" />
@@ -931,6 +935,7 @@ index 5298d47..fd9f60a 100644
      <ClCompile Include="src\CameraScan.cpp" />
      <ClCompile Include="src\OpenXRBridge.cpp" />
 +    <ClCompile Include="src\MotionInput.cpp" />
++    <ClCompile Include="src\MouseMap.cpp" />
    </ItemGroup>
    <ItemGroup>
      <ClInclude Include="src\Logger.h" />
@@ -954,6 +959,7 @@ index 5298d47..fd9f60a 100644
 +    <ClInclude Include="src\Comfort.h" />
      <ClInclude Include="src\OpenXRBridge.h" />
 +    <ClInclude Include="src\MotionInput.h" />
++    <ClInclude Include="src\MouseMap.h" />
    </ItemGroup>
    <ItemGroup>
      <None Include="WarbandVR.def" />
@@ -2426,10 +2432,10 @@ index 0000000..5ac8c4d
 +What still needs a human: `docs/manual_test_checklist.md`.
 diff --git a/docs/08_Controls_and_Setup.md b/docs/08_Controls_and_Setup.md
 new file mode 100644
-index 0000000..d95df36
+index 0000000..24a8a4a
 --- /dev/null
 +++ b/docs/08_Controls_and_Setup.md
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,169 @@
 +# 08 — Controls & setup guide
 +
 +## Setup (quick path)
@@ -2469,6 +2475,8 @@ index 0000000..d95df36
 +| OutputMode | 0 | 0 = SBS on monitor, 1 = OpenXR headset. |
 +| SharedSurface | 0 | Fast GPU handoff (D3D9Ex). Try slow path first. |
 +| MirrorOnDesktop | 0 | Spectator SBS on the monitor while in VR. |
++| SBSAspectCorrect | 1 | Letterbox per-eye images into split panels (preserves menu proportions); 0 = stretch to fill. |
++| SBSMouseRemap | 1 | Remap split-panel cursor coords to the game's full-window logical space (correct hover/click targets). |
 +| ForceNoVsync | 1 | Force present-interval immediate under OutputMode=1. |
 +| CinemaMode | 0 | Fixed quad "diorama" display instead of immersive projection. Pair with HeadTracking=0. |
 +| FramePacing | 0 | 0 = xrWaitFrame paces the game thread; 1 = free-run, XR gets one frame per display period. Try 1 for periodic stutter. |
@@ -3095,10 +3103,10 @@ index 0000000..119473f
 +native source fork.
 diff --git a/docs/14_FAQ_Troubleshooting.md b/docs/14_FAQ_Troubleshooting.md
 new file mode 100644
-index 0000000..95d23bc
+index 0000000..f3ab1a1
 --- /dev/null
 +++ b/docs/14_FAQ_Troubleshooting.md
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,197 @@
 +# 14 — FAQ and troubleshooting
 +
 +This page collects the likely failure modes from the risk register and the
@@ -3194,6 +3202,17 @@ index 0000000..95d23bc
 +4. `EnableStereo=1` and `OutputMode=1`.
 +5. Slow path first: `SharedSurface=0`.
 +6. Steam Link streaming already works for the flat game.
++
++### A menu item highlights even when the cursor is outside it
++
++That's a cursor-coordinate mismatch, not a rendering bug: the game hit-tests
++in full-window coordinates while the cursor arrives in split-panel
++coordinates. The new SBS mouse remap (`[Output] SBSMouseRemap=1`, default on)
++converts panel coordinates into the game's logical space using the exact
++inverse of the composite transform, so hover and clicks land on the intended
++item. It only applies to SBS output (OutputMode=0); OpenXR presentation is
++unaffected. If a menu still misbehaves with it on, try SBSMouseRemap=0 and
++report which input path your Warband build uses.
 +
 +### SBS menu looks distorted or laid out for the full window
 +
@@ -4180,7 +4199,7 @@ index 0000000..21f288f
 +    }
 +}
 diff --git a/src/Config.cpp b/src/Config.cpp
-index 5f27ebc..93d31cc 100644
+index 5f27ebc..e0ca127 100644
 --- a/src/Config.cpp
 +++ b/src/Config.cpp
 @@ -1,5 +1,8 @@
@@ -4242,7 +4261,7 @@ index 5f27ebc..93d31cc 100644
  }
  
  Config& Config::Get() { return g_cfg; }
-@@ -60,17 +90,86 @@ void Config::Load()
+@@ -60,17 +90,87 @@ void Config::Load()
      char path[MAX_PATH];
      IniPath(path, sizeof(path));
  
@@ -4277,6 +4296,7 @@ index 5f27ebc..93d31cc 100644
 +    sharedSurface        = GetBool(path, "Output", "SharedSurface", sharedSurface);
 +    mirrorOnDesktop      = GetBool(path, "Output", "MirrorOnDesktop", mirrorOnDesktop);
 +    sbsAspectCorrect     = GetBool(path, "Output", "SBSAspectCorrect", sbsAspectCorrect);
++    sbsMouseRemap        = GetBool(path, "Output", "SBSMouseRemap", sbsMouseRemap);
 +    forceNoVsync         = GetBool(path, "Output", "ForceNoVsync", forceNoVsync);
 +    cinemaMode           = GetBool(path, "Output", "CinemaMode", cinemaMode);
 +    framePacing          = GetPrivateProfileIntA("Output", "FramePacing", framePacing, path);
@@ -4330,7 +4350,7 @@ index 5f27ebc..93d31cc 100644
  
      headTracking         = GetBool(path, "Tracking", "HeadTracking", headTracking);
      trackingSmoothing    = GetBool(path, "Tracking", "Smoothing", trackingSmoothing);
-@@ -79,29 +178,37 @@ void Config::Load()
+@@ -79,29 +179,37 @@ void Config::Load()
      recenterKey          = static_cast<int>(GetULong(path, "Tracking", "RecenterKey",
                                                       static_cast<unsigned long>(recenterKey)));
      lockInMenus          = GetBool(path, "Tracking", "LockInMenus", lockInMenus);
@@ -4373,7 +4393,7 @@ index 5f27ebc..93d31cc 100644
 +             comfortVignette ? 1 : 0, vignetteStrength, worldScalePreset);
  }
 diff --git a/src/Config.h b/src/Config.h
-index a31ae29..52e95e6 100644
+index a31ae29..8fb33e3 100644
 --- a/src/Config.h
 +++ b/src/Config.h
 @@ -1,3 +1,4 @@
@@ -4381,7 +4401,7 @@ index a31ae29..52e95e6 100644
  #pragma once
  
  // Runtime configuration, loaded from WarbandVR.ini next to the proxy DLL.
-@@ -12,13 +13,79 @@ struct Config
+@@ -12,13 +13,82 @@ struct Config
      float worldScale            = 1.0f;   // metres -> warband units
      int   viewSource            = 0;      // 0 = SetTransform, 1 = VS constant
      int   vsViewRegister        = 0;      // c-register of view(/proj) matrix
@@ -4413,6 +4433,9 @@ index a31ae29..52e95e6 100644
 +    bool  sbsAspectCorrect      = true;   // letterbox per-eye images into the
 +                                          // split panels instead of stretching
 +                                          // (menus keep their aspect ratio)
++    bool  sbsMouseRemap         = true;   // remap cursor coords to the game's
++                                          // full-window logical space (fixes
++                                          // hover/hit-test in split panels)
 +    bool  forceNoVsync          = true;   // force present-interval immediate when
 +                                          // OutputMode=1 (XR pacing owns the rate)
 +    bool  cinemaMode            = false;  // fixed quad layer instead of immersive
@@ -4463,7 +4486,7 @@ index a31ae29..52e95e6 100644
  
      // [Tracking] (M4; pose source arrives with OpenXR in M3)
      bool  headTracking          = false;
-@@ -27,6 +94,13 @@ struct Config
+@@ -27,6 +97,13 @@ struct Config
      float smoothingBeta         = 0.02f;  // OneEuro speed coefficient
      int   recenterKey           = 0x77;   // VK_F8 default
      bool  lockInMenus           = true;   // freeze tracking when view is static
@@ -4477,7 +4500,7 @@ index a31ae29..52e95e6 100644
  
      // [Camera] (M4 true camera coupling; filled by M0-C)
      char  gameBuild[64]         = "";     // refuse camera writes if mismatch
-@@ -35,6 +109,8 @@ struct Config
+@@ -35,6 +112,8 @@ struct Config
      int   logLevel              = 2;
      int   logViewMatrices       = 25;
      int   captureMode           = 0;      // 0 off, 1 SetTransform, 2 VS consts
@@ -8031,6 +8054,144 @@ index 0000000..16e5c09
 +    // Called once per submitted frame (from OpenXRBridge::SubmitFrame).
 +    void OnFrame();
 +}
+diff --git a/src/MouseMap.cpp b/src/MouseMap.cpp
+new file mode 100644
+index 0000000..b6e1ccb
+--- /dev/null
++++ b/src/MouseMap.cpp
+@@ -0,0 +1,72 @@
++// SPDX-License-Identifier: GPL-3.0-only
++#include "MouseMap.h"
++#include "Config.h"
++#include "StereoRenderer.h"
++
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#include <windowsx.h>
++
++namespace
++{
++    HHOOK g_hook = nullptr;
++    HWND g_hwnd = nullptr;
++
++    LRESULT CALLBACK RemapProc(int code, WPARAM wp, LPARAM lp)
++    {
++        if (code == HC_ACTION)
++        {
++            MSG* msg = reinterpret_cast<MSG*>(lp);
++            const bool mouseMsg =
++                msg->message == WM_MOUSEMOVE ||
++                (msg->message >= WM_LBUTTONDOWN && msg->message <= WM_MBUTTONDBLCLK);
++            if (mouseMsg && g_hwnd)
++            {
++                const Config& cfg = Config::Get();
++                const UINT eyeW = StereoRenderer::Get().EyeWidth();
++                const UINT eyeH = StereoRenderer::Get().EyeHeight();
++                if (cfg.enableStereo && cfg.outputMode == 0 && cfg.sbsMouseRemap &&
++                    eyeW != 0 && eyeH != 0)
++                {
++                    RECT rc{};
++                    GetClientRect(g_hwnd, &rc);
++                    const long halfW = rc.right / 2;
++                    const long bbH = rc.bottom;
++                    const long x = GET_X_LPARAM(msg->lParam);
++                    const long y = GET_Y_LPARAM(msg->lParam);
++                    const int eye = (x >= halfW) ? 1 : 0;
++                    long lx = x, ly = y;
++                    MouseMap::ClientToLogical(eye, x, y, halfW, bbH,
++                                              static_cast<long>(eyeW),
++                                              static_cast<long>(eyeH),
++                                              cfg.sbsAspectCorrect, &lx, &ly);
++                    msg->lParam = static_cast<LPARAM>(
++                        (static_cast<DWORD>(lx) & 0xFFFFu) |
++                        ((static_cast<DWORD>(ly) & 0xFFFFu) << 16));
++                }
++            }
++        }
++        return CallNextHookEx(g_hook, code, wp, lp);
++    }
++}
++
++void MouseMap::Install(void* gameWindow)
++{
++    if (g_hook) return;
++    g_hwnd = static_cast<HWND>(gameWindow);
++    if (!g_hwnd) return;
++    const DWORD tid = GetWindowThreadProcessId(g_hwnd, nullptr);
++    if (!tid) { g_hwnd = nullptr; return; }
++    HMODULE self = nullptr;
++    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
++                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++                       reinterpret_cast<LPCSTR>(&RemapProc), &self);
++    g_hook = SetWindowsHookExA(WH_GETMESSAGE, RemapProc, self, tid);
++}
++
++void MouseMap::Uninstall()
++{
++    if (g_hook) UnhookWindowsHookEx(g_hook);
++    g_hook = nullptr;
++    g_hwnd = nullptr;
++}
+diff --git a/src/MouseMap.h b/src/MouseMap.h
+new file mode 100644
+index 0000000..e8846e5
+--- /dev/null
++++ b/src/MouseMap.h
+@@ -0,0 +1,54 @@
++// SPDX-License-Identifier: GPL-3.0-only
++#pragma once
++
++// MouseMap: split-panel cursor remapping for SBS output.
++//
++// The game hit-tests UI in FULL-WINDOW logical coordinates, but the user
++// moves the cursor in SPLIT-PANEL coordinates. Without remapping, a hover
++// over empty space can light up a button (the "Options highlighted while
++// outside the menu" bug). The mapping below is the exact inverse of the
++// SBS composite transform, so the game receives the logical position the
++// user actually points at. Pure math is host-testable; the Windows message
++// hook lives in MouseMap.cpp.
++
++namespace MouseMap
++{
++    struct Panel { float scaleX, scaleY; long x0, y0; };
++
++    // Composite transform for one eye panel. Kept in sync with
++    // StereoRenderer::CompositeToBackbuffer.
++    inline Panel PanelForEye(int eye, long halfW, long bbH, long eyeW, long eyeH,
++                             bool aspectCorrect)
++    {
++        if (!aspectCorrect)
++        {
++            // Old stretch-to-fill: X is squeezed into the panel, Y fills the
++            // window height (independent scales).
++            return { halfW / static_cast<float>(eyeW),
++                     bbH / static_cast<float>(eyeH),
++                     eye * halfW, 0L };
++        }
++
++        const float sx = halfW / static_cast<float>(eyeW);
++        const float sy = bbH / static_cast<float>(eyeH);
++        const float s = sx < sy ? sx : sy;
++        const long w = static_cast<long>(eyeW * s + 0.5f);
++        const long h = static_cast<long>(eyeH * s + 0.5f);
++        return { s, s, eye * halfW + (halfW - w) / 2, (bbH - h) / 2 };
++    }
++
++    // Client (window) coordinates -> the game's full-window logical
++    // coordinates, for the panel under the cursor.
++    inline void ClientToLogical(int eye, long x, long y, long halfW, long bbH,
++                                long eyeW, long eyeH, bool aspectCorrect,
++                                long* outX, long* outY)
++    {
++        const Panel p = PanelForEye(eye, halfW, bbH, eyeW, eyeH, aspectCorrect);
++        *outX = static_cast<long>((x - p.x0) / p.scaleX);
++        *outY = static_cast<long>((y - p.y0) / p.scaleY);
++    }
++
++    // Installs the WH_GETMESSAGE remap on the window's thread. Idempotent.
++    void Install(void* gameWindow);
++    void Uninstall();
++}
 diff --git a/src/OneEuroFilter.h b/src/OneEuroFilter.h
 index c5b7977..917d0bd 100644
 --- a/src/OneEuroFilter.h
@@ -9190,10 +9351,10 @@ index 0000000..9650c79
 +    }
 +}
 diff --git a/src/StereoRenderer.cpp b/src/StereoRenderer.cpp
-index d708385..d1b8ec9 100644
+index d708385..68040f9 100644
 --- a/src/StereoRenderer.cpp
 +++ b/src/StereoRenderer.cpp
-@@ -1,11 +1,15 @@
+@@ -1,11 +1,16 @@
 +// SPDX-License-Identifier: GPL-3.0-only
  #include "StereoRenderer.h"
  #include "Config.h"
@@ -9203,13 +9364,14 @@ index d708385..d1b8ec9 100644
  #include "OpenXRBridge.h"
  #include "OneEuroFilter.h"
 +#include "Comfort.h"
++#include "MouseMap.h"
  
  #include <cstring>
 +#include <algorithm>
  
  StereoRenderer& StereoRenderer::Get()
  {
-@@ -13,9 +17,12 @@ StereoRenderer& StereoRenderer::Get()
+@@ -13,14 +18,24 @@ StereoRenderer& StereoRenderer::Get()
      return s;
  }
  
@@ -9223,15 +9385,29 @@ index d708385..d1b8ec9 100644
      if (pp) m_pp = *pp;
      if (m_qpcFreq.QuadPart == 0) QueryPerformanceFrequency(&m_qpcFreq);
      ReleaseResources();
-@@ -36,7 +43,6 @@ void StereoRenderer::OnReset(IDirect3DDevice9* device, const D3DPRESENT_PARAMETE
+     if (Config::Get().enableStereo)
++    {
+         CreateResources(device);
++        // Cursor coordinates must match the composite transform or menu
++        // hit-tests land on the wrong item (Options hover outside the menu).
++        if (Config::Get().outputMode == 0 && Config::Get().sbsMouseRemap &&
++            pp && pp->hDeviceWindow)
++            MouseMap::Install(pp->hDeviceWindow);
++    }
+ }
+ 
+ void StereoRenderer::OnReset(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS* pp)
+@@ -35,8 +50,8 @@ void StereoRenderer::OnReset(IDirect3DDevice9* device, const D3DPRESENT_PARAMETE
+ 
  void StereoRenderer::Shutdown()
  {
++    MouseMap::Uninstall();
      ReleaseResources();
 -    m_device = nullptr;
      m_active = false;
  }
  
-@@ -61,56 +67,348 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
+@@ -61,56 +76,348 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
          return;
      }
  
@@ -9274,9 +9450,7 @@ index d708385..d1b8ec9 100644
 +    bool ok = true;
 +    HRESULT hr = S_OK;
 +    for (int eye = 0; eye < 2 && ok; ++eye)
-     {
--        LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) failed hr=0x%08X", w * 2, h, hr);
--        m_stereoSurf = nullptr;
++    {
 +        if (wantShared)
 +        {
 +            hr = device->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt,
@@ -9316,7 +9490,9 @@ index d708385..d1b8ec9 100644
 +        }
 +    }
 +    if (!ok)
-+    {
+     {
+-        LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) failed hr=0x%08X", w * 2, h, hr);
+-        m_stereoSurf = nullptr;
 +        ReleaseResources();
          return;
      }
@@ -9414,7 +9590,7 @@ index d708385..d1b8ec9 100644
 +        device->SetRenderTarget(0, m_eyeSurf[eye]);
 +        if (m_eyeDS[eye]) device->SetDepthStencilSurface(m_eyeDS[eye]);
 +        device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
-     }
++    }
 +
 +    device->SetRenderTarget(0, savedRT);
 +    if (savedRT) savedRT->Release();
@@ -9593,7 +9769,7 @@ index d708385..d1b8ec9 100644
 +        device->SetRenderTarget(0, m_eyeSurf[eye]);
 +        device->SetDepthStencilSurface(nullptr);
 +        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
-+    }
+     }
 +
 +    saved.Restore(device);
  }
@@ -9607,7 +9783,7 @@ index d708385..d1b8ec9 100644
  
      // Perf rollup: every 600 frames report average duplication cost.
      ++m_frameCount;
-@@ -126,26 +424,29 @@ void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
+@@ -126,26 +433,29 @@ void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
  
  void StereoRenderer::OnPresent(IDirect3DDevice9* device)
  {
@@ -9647,7 +9823,7 @@ index d708385..d1b8ec9 100644
  }
  
  void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
-@@ -154,28 +455,130 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
+@@ -154,28 +464,130 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
      if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
          return;
  
@@ -9662,18 +9838,18 @@ index d708385..d1b8ec9 100644
 -    const LONG bbH     = static_cast<LONG>(bbDesc.Height);
 +    const LONG halfW = static_cast<LONG>(bbDesc.Width / 2);
 +    const LONG bbH   = static_cast<LONG>(bbDesc.Height);
- 
--    RECT srcL = { 0,     0, halfW,        h };
--    RECT srcR = { halfW, 0, halfW * 2,    h };
--    RECT dstL = { 0,       0, bbHalfW,     bbH };
--    RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
++
 +    for (int eye = 0; eye < 2; ++eye)
 +    {
 +        if (!m_eyeSurf[eye]) continue;
 +        D3DSURFACE_DESC srcDesc{};
 +        m_eyeSurf[eye]->GetDesc(&srcDesc);
 +        RECT src = { 0, 0, static_cast<LONG>(srcDesc.Width), static_cast<LONG>(srcDesc.Height) };
-+
+ 
+-    RECT srcL = { 0,     0, halfW,        h };
+-    RECT srcR = { halfW, 0, halfW * 2,    h };
+-    RECT dstL = { 0,       0, bbHalfW,     bbH };
+-    RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
 +        // The game lays out menus and text for the FULL window width. Simply
 +        // stretching each full-width eye into its split panel distorts that
 +        // UI per panel (the "menu glitch" report). Fit the eye into the
@@ -9693,14 +9869,14 @@ index d708385..d1b8ec9 100644
 +        }
 +        else
 +            dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
-+
-+        // D3DTEXF_NONE keeps this legal for equal-format surfaces.
-+        device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
-+    }
  
 -    // D3DTEXF_NONE keeps this legal for equal-format surfaces.
 -    device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
 -    device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
++        // D3DTEXF_NONE keeps this legal for equal-format surfaces.
++        device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
++    }
++
 +    static bool s_loggedComposite = false;
 +    if (!s_loggedComposite)
 +    {
@@ -9792,7 +9968,7 @@ index d708385..d1b8ec9 100644
  void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  {
      // Menu-lock bookkeeping: note when the view last actually changed.
-@@ -184,9 +587,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
+@@ -184,9 +596,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  
      m_baseView = m;
      m_hasView  = true;
@@ -9804,7 +9980,7 @@ index d708385..d1b8ec9 100644
      {
          char buf[640];
          Mat::Format(m, buf, sizeof(buf));
-@@ -207,7 +611,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
+@@ -207,7 +620,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
      m_hasGameVp = true;
  }
  
@@ -9824,7 +10000,7 @@ index d708385..d1b8ec9 100644
  
  void StereoRenderer::CheckRecenterKey()
  {
-@@ -216,7 +631,10 @@ void StereoRenderer::CheckRecenterKey()
+@@ -216,7 +640,10 @@ void StereoRenderer::CheckRecenterKey()
  
      bool down = (GetAsyncKeyState(cfg.recenterKey) & 0x8000) != 0;
      if (down && !m_recenterKeyDown)
@@ -9836,7 +10012,7 @@ index d708385..d1b8ec9 100644
      m_recenterKeyDown = down;
  }
  
-@@ -246,32 +664,84 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
+@@ -246,32 +673,84 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
      return Mat::Multiply(Mat::Multiply(rt, tInv), view);
  }
  
@@ -9893,10 +10069,7 @@ index d708385..d1b8ec9 100644
 +                              : RECT{ 0, 0, static_cast<LONG>(m_eyeW), static_cast<LONG>(m_eyeH) };
 +        device->SetScissorRect(&r);
 +    }
- 
--    // M4: head pose delta composes onto the captured view first.
--    D3DMATRIX headView = ApplyHeadDelta(m_baseView);
--    D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
++
 +    // Samplers bound to the ACTIVE shadow pass's surface get this eye's copy
 +    // (M2). ONLY during that pass: applying these binds to later main-scene
 +    // draws would leak offscreen content into unrelated geometry (an
@@ -9905,7 +10078,10 @@ index d708385..d1b8ec9 100644
 +        for (const auto& bind : m_shadowBinds)
 +            if (bind.second == m_shadowActive)
 +                device->SetTexture(bind.first, bind.second->eyeTex[eye]);
-+
+ 
+-    // M4: head pose delta composes onto the captured view first.
+-    D3DMATRIX headView = ApplyHeadDelta(m_baseView);
+-    D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
 +    if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
 +
 +    const float halfSep = (cfg.ipd * cfg.worldScale) * 0.5f;
@@ -9932,7 +10108,7 @@ index d708385..d1b8ec9 100644
          // Fixed-function path: overwrite the VIEW transform for this eye.
          device->SetTransform(D3DTS_VIEW, &eyeView);
  
-@@ -284,19 +754,74 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
+@@ -284,19 +763,74 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
      }
      else
      {
@@ -10013,7 +10189,7 @@ index d708385..d1b8ec9 100644
      if (m_hasView && Config::Get().viewSource == 0)
          device->SetTransform(D3DTS_VIEW, &m_baseView);
      if (m_hasProj && Config::Get().asymmetricProjection && Config::Get().viewSource == 0)
-@@ -308,3 +833,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
+@@ -308,3 +842,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
      m_dupTimeUs += microseconds;
      m_dupCalls  += drawCalls;
  }
@@ -11636,7 +11812,7 @@ index 0000000..6a6a70a
 +};
 diff --git a/tests/run_all.sh b/tests/run_all.sh
 new file mode 100644
-index 0000000..7409285
+index 0000000..57f6b9b
 --- /dev/null
 +++ b/tests/run_all.sh
 @@ -0,0 +1,71 @@
@@ -11655,7 +11831,7 @@ index 0000000..7409285
 +g++ -std=c++17 -Wall -Wextra -Werror -Itests/winshim -Itests -Isrc \
 +    tests/test_integration.cpp tests/fake_device.cpp tests/winshim_impl.cpp \
 +    src/Logger.cpp src/Config.cpp src/Capture.cpp src/CameraScan.cpp \
-+    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp \
++    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp src/MouseMap.cpp \
 +    -o tests/run_integration
 +./tests/run_integration
 +
@@ -11663,7 +11839,7 @@ index 0000000..7409285
 +g++ -std=c++17 -Wall -Wextra -Werror -Itests/winshim -Itests -Isrc \
 +    tests/test_fuzz.cpp tests/fake_device.cpp tests/winshim_impl.cpp \
 +    src/Logger.cpp src/Config.cpp src/Capture.cpp src/CameraScan.cpp \
-+    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp \
++    src/StereoRenderer.cpp src/DeviceHooks.cpp src/OpenXRBridge.cpp src/MouseMap.cpp \
 +    -o tests/run_fuzz
 +./tests/run_fuzz
 +
@@ -12342,10 +12518,10 @@ index 0000000..83244c2
 +}
 diff --git a/tests/test_main.cpp b/tests/test_main.cpp
 new file mode 100644
-index 0000000..9658bf8
+index 0000000..0d53a42
 --- /dev/null
 +++ b/tests/test_main.cpp
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,539 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// WarbandVR headless unit tests - pure logic only (no Windows/D3D9/XR).
 +// Build:  g++ -std=c++17 -Wall -Wextra -I../src test_main.cpp -o run_tests
@@ -12360,6 +12536,7 @@ index 0000000..9658bf8
 +#include "ParseUtil.h"
 +#include "OneEuroFilter.h"
 +#include "Comfort.h"
++#include "MouseMap.h"
 +
 +#include <cstdio>
 +#include <cmath>
@@ -12811,6 +12988,31 @@ index 0000000..9658bf8
 +// Comfort policy / radial vignette
 +// ---------------------------------------------------------------------------
 +
++static void TestMouseMap()
++{
++    // 1600x900 window -> two 800x900 panels, eyes 1600x900, aspect-correct.
++    // Fit is scale 0.5, left panel at (0,225), right at (800,225).
++    long lx = 0, ly = 0;
++    MouseMap::ClientToLogical(0, 100, 300, 800, 900, 1600, 900, true, &lx, &ly);
++    CHECK(lx == 200 && ly == 150);           // (100/0.5, (300-225)/0.5)
++    MouseMap::ClientToLogical(1, 900, 300, 800, 900, 1600, 900, true, &lx, &ly);
++    CHECK(lx == 200 && ly == 150);           // same logical point on right eye
++
++    // Center of the left panel's menu area maps back to logical center.
++    MouseMap::ClientToLogical(0, 400, 450, 800, 900, 1600, 900, true, &lx, &ly);
++    CHECK(lx == 800 && ly == 450);
++
++    // Stretch-to-fill mapping: x halves, y unchanged.
++    MouseMap::ClientToLogical(0, 100, 300, 800, 900, 1600, 900, false, &lx, &ly);
++    CHECK(lx == 200 && ly == 300);
++    MouseMap::ClientToLogical(1, 900, 300, 800, 900, 1600, 900, false, &lx, &ly);
++    CHECK(lx == 200 && ly == 300);
++
++    // Off-panel positions map outside the logical window (no false hover).
++    MouseMap::ClientToLogical(0, 10, 10, 800, 900, 1600, 900, true, &lx, &ly);
++    CHECK(ly < 0); // above the letterboxed image
++}
++
 +static void TestComfort()
 +{
 +    float scale = 0.0f;
@@ -12853,6 +13055,7 @@ index 0000000..9658bf8
 +    TestGestureZones();
 +    TestParse();
 +    TestOneEuro();
++    TestMouseMap();
 +    TestComfort();
 +
 +    printf("%d checks, %d failures\n", g_checks, g_failures);
@@ -13838,10 +14041,10 @@ index 0000000..d0c9490
 +#define _SH_DENYNO 0x40
 diff --git a/tests/winshim/windows.h b/tests/winshim/windows.h
 new file mode 100644
-index 0000000..468c8ba
+index 0000000..645c892
 --- /dev/null
 +++ b/tests/winshim/windows.h
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,270 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +#pragma once
 +// Minimal Win32 shim for HOST (Linux) builds of the integration tests.
@@ -13894,6 +14097,7 @@ index 0000000..468c8ba
 +#define __stdcall
 +#define __cdecl
 +#define WINAPI __stdcall
++#define CALLBACK __stdcall
 +#define __forceinline inline
 +#define WIN32_LEAN_AND_MEAN
 +// Host shim: use an object pointer so production reinterpret_casts to each
@@ -14070,6 +14274,36 @@ index 0000000..468c8ba
 +#define IMAGE_FIRST_SECTION(h) ((h)->sections)
 +#define IMAGE_SCN_CNT_INITIALIZED_DATA 0x40
 +
++// message-hook surface for MouseMap
++typedef void* HHOOK;
++typedef uintptr_t WPARAM;
++typedef intptr_t  LPARAM;
++typedef intptr_t  LRESULT;
++typedef struct tagMSG { HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam; DWORD time; POINT pt; } MSG;
++#define WH_GETMESSAGE 3
++#define HC_ACTION 0
++#define WM_MOUSEMOVE     0x0200
++#define WM_LBUTTONDOWN   0x0201
++#define WM_LBUTTONUP     0x0202
++#define WM_LBUTTONDBLCLK 0x0203
++#define WM_RBUTTONDOWN   0x0204
++#define WM_RBUTTONUP     0x0205
++#define WM_RBUTTONDBLCLK 0x0206
++#define WM_MBUTTONDOWN   0x0207
++#define WM_MBUTTONUP     0x0208
++#define WM_MBUTTONDBLCLK 0x0209
++#define LOWORD(l) ((WORD)((uintptr_t)(l) & 0xffff))
++#define HIWORD(l) ((WORD)(((uintptr_t)(l) >> 16) & 0xffff))
++#define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
++#define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
++extern "C" {
++HHOOK SetWindowsHookExA(int, LRESULT (__stdcall *)(int, WPARAM, LPARAM), HMODULE, DWORD);
++BOOL UnhookWindowsHookEx(HHOOK);
++LRESULT CallNextHookEx(HHOOK, int, WPARAM, LPARAM);
++DWORD GetWindowThreadProcessId(HWND, DWORD*);
++BOOL GetClientRect(HWND, RECT*);
++}
++
 +#define IMAGE_DOS_SIGNATURE 0x5A4D
 +typedef IMAGE_NT_HEADERS IMAGE_NT_HEADERS32;
 +
@@ -14081,12 +14315,21 @@ index 0000000..468c8ba
 +#define PAGE_EXECUTE_READ 0x20
 +#define PAGE_EXECUTE_READWRITE 0x40
 +#define PAGE_GUARD 0x100
+diff --git a/tests/winshim/windowsx.h b/tests/winshim/windowsx.h
+new file mode 100644
+index 0000000..063c997
+--- /dev/null
++++ b/tests/winshim/windowsx.h
+@@ -0,0 +1,3 @@
++// SPDX-License-Identifier: GPL-3.0-only
++#pragma once
++#include "windows.h"
 diff --git a/tests/winshim_impl.cpp b/tests/winshim_impl.cpp
 new file mode 100644
-index 0000000..5b55bf8
+index 0000000..1d04458
 --- /dev/null
 +++ b/tests/winshim_impl.cpp
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,183 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// Implementations for the Win32 shim (host builds of the integration tests).
 +#include "windows.h"
@@ -14260,6 +14503,15 @@ index 0000000..5b55bf8
 +    std::remove(HostPath(to).c_str());
 +    return std::rename(HostPath(from).c_str(), HostPath(to).c_str()) == 0 ? 1 : 0;
 +}
++}
++
++// MouseMap hook stubs: no real message pump in headless tests.
++extern "C" {
++HHOOK SetWindowsHookExA(int, LRESULT (__stdcall *)(int, WPARAM, LPARAM), HMODULE, DWORD) { return (HHOOK)0xBEEF; }
++BOOL UnhookWindowsHookEx(HHOOK) { return 1; }
++LRESULT CallNextHookEx(HHOOK, int, WPARAM, LPARAM) { return 0; }
++DWORD GetWindowThreadProcessId(HWND, DWORD*) { return 1; }
++BOOL GetClientRect(HWND, RECT* rc) { rc->left = rc->top = 0; rc->right = 1600; rc->bottom = 900; return 1; }
 +}
 diff --git a/tests/xr_fake.cpp b/tests/xr_fake.cpp
 new file mode 100644
