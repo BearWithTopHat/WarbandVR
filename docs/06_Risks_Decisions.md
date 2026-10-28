@@ -19,6 +19,8 @@ risk register below is kept current.
 | R7 | Motion melee injection misread by engine (attack direction stochastic) | Medium | M5 quality | M0-C input-state RE; extensive tunables; keep flat scheme as config option | Open |
 | R8 | Scope creep into multiplayer | — | Project death | Explicit non-goals in design doc; AGENTS.md invariant 6. Native Steam Frame is now a Phase-2 package sharing this source tree (not scope creep), but its runtime is unverified | Controlled |
 | R9 | Draw duplication misses frame budget in large battles (R3 realized) | Medium | Comfort | Depth-reprojection fallback (BannerlordVR lesson, docs/15): render one eye, rebuild the other from the Z-prepass depth at composite time. Design only; implement only if R3 measures bad on hardware | Open |
+| R10 | Frame-rate-dependent input feel at non-vanilla cadences | Medium | Comfort/gameplay | All rate-based injection (look, steering) is dt-scaled to 60 fps. WSE2's fix history confirms the bug class | Mitigated |
+| R11 | WSE2-x64 or threaded-renderer coexistence | Medium | Incompatible | Documented as incompatible/untested in FAQ; no x64 build planned (stock Warband is 32-bit) | Controlled |
 
 ## Decision log
 

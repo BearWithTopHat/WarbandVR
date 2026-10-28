@@ -73,7 +73,7 @@ WorldScale` is still supported as an expert override and wins over the preset.
 | BlockHoldTime | 0.15 | Grip-hold seconds before block engages. |
 | AttackCooldownMs | 400 | Min ms between injected attacks. |
 | MotionSteer | 1 | Held swing follows live hand motion. |
-| SteerScale | 40.0 | Mouse px per m/s of hand speed while steering. |
+| SteerScale | 40.0 | Mouse px per m/s of hand speed while steering at 60 fps (dt-scaled). |
 | SteerMaxDeltaPx | 60 | Per-poll clamp on steering deltas; 0 disables steering. |
 | SteerMaxHoldMs | 600 | Safety force-release of a held attack. |
 | GrabRefractoryMs | 400 | Swing suppression after a zone grab/holster. |
@@ -82,7 +82,7 @@ WorldScale` is still supported as an expert override and wins over the preset.
 | ControllerPreset | (empty) | `generic`/`psvr2`/`quest`: loads `[Preset.<name>]` overrides for SwingThreshold/SteerScale/BlockHoldTime. Empty = use [Input] values. |
 | GestureGrab | 1 | Grab-zone gestures emit the F1–F6 gesture keys (companion module turns them into equipment switches). |
 | AttackHoldTrigger | 1 | Right trigger hold = LMB hold (physical bow draw); owns LMB while held. |
-| MouseSpeed | 6.0 | Right-stick look sensitivity. |
+| MouseSpeed | 6.0 | Right-stick look sensitivity in px/frame at 60 fps (dt-scaled). |
 | StickDeadzone | 0.2 | Stick deadzone. |
 | [InputMap] Forward/Back/Left/Right/Use/Jump | W/S/A/D/F/SPACE | Emulated keys (names or single chars). |
 | [InputMap] GrabHipLeft/GrabHipRight/GrabShoulder/GrabQuiver/TwoHand/Holster | F1/F2/F3/F4/F5/F6 | Gesture-channel keys the companion module listens for. |

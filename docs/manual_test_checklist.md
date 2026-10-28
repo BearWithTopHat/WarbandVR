@@ -86,6 +86,10 @@ Run order matters: always clear section 0 before anything else.
 - [ ] Crossbow ritual in either order: quiver-grab then both-grips AND
       both-grips then quiver-grab must each seat one bolt; switching weapons
       mid-ritual resets it within ~1 s.
+- [ ] Repeat with light AND heavy crossbows, after a weapon switch, and with
+      one bolt left (WSE2's reload parity fixes suggest native edge cases).
+- [ ] Right-stick look and held-attack steering feel the same at 60/90/144 fps
+      (dt-scaled rates, not per-frame).
 - [ ] Runtime matrix: validate on SteamVR OpenXR first. Meta's own runtime
       is a known-bad path in adjacent projects (docs/15); answer Meta-runtime
       issues with "use SteamVR or VDXR", not code changes.

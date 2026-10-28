@@ -83,7 +83,19 @@ The full wrapper should be immune to vtable-pointer shadowing. Verify that the
 game really loaded this proxy, that no other `d3d9.dll` wrapper is chained
 first, and that the log reaches `Device created OK`.
 
-### Headset shows no image
+### WSE2 compatibility
+
+- **WSE2-x64 is incompatible**: a 64-bit Warband process cannot load the
+  32-bit d3d9.dll proxy (WarbandVR is Win32-only by design, because stock
+  Warband is 32-bit).
+- **WSE2-x86 coexistence is untested and risky**: WSE2 also patches rendering
+  and has a threaded renderer, while the proxy assumes single-threaded D3D9
+  calls. Do not run both without validating on your setup; if you must, test
+  with WSE2's threaded renderer disabled.
+- Mouse sensitivity and held-attack steering are **dt-scaled to a 60 fps
+  reference** (frame-rate independent, matching the WSE2-fixed bug class).
+
+### Water/ocean shows a repeating animal (or other offscreen) texture
 
 Check in order:
 

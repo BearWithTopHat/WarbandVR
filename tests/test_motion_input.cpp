@@ -175,7 +175,7 @@ int main()
     // --- right stick smooth look and face buttons ---------------------------
     XrFake::SetVec2("stick", XrFake::Right, 0.5f, 0.0f);
     Frame(1040);
-    CHECK(g_rec.Has("M3,0"));
+    CHECK(g_rec.Has("M1,0")); // 0.5 * 6 * 0.6 = 1.8 -> 1
     XrFake::SetVec2("stick", XrFake::Right, 0.0f, 0.0f);
     XrFake::SetBool("primary", XrFake::Right, true);
     Frame(1050);
@@ -280,7 +280,7 @@ int main()
     XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
     Frame(1020);
     CHECK(g_rec.Count("M80,0") == 1); // initial direction delta
-    CHECK(g_rec.Count("M60,0") == 1); // steer delta, clamped to SteerMaxDeltaPx
+    CHECK(g_rec.Count("M47,0") == 1); // dt=10ms: 2*40*0.6 = 48.0f -> 47 (truncation)
     XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
     Frame(1141);                     // hand stopped, minimum hold elapsed
     CHECK(g_rec.Has("BL:0"));
@@ -300,6 +300,34 @@ int main()
     CHECK(g_rec.Has("M0,80"));
     Frame(2131);
     CHECK(g_rec.Count("BL:0") >= 3);
+
+    // --- dt-scaled look: same px/sec at any frame rate ----------------------
+    Restart();
+    XrFake::SetVec2("stick", XrFake::Right, 1.0f, 0.0f);
+    Frame(1000);                       // first frame: dt defaults to 1/60
+    Frame(1016);                       // 16 ms: dt60 ~= 1.0 -> 6 px
+    CHECK(g_rec.Has("M6,0"));
+    g_rec.Clear();
+    Frame(1023);                       // 7 ms: dt60 = 0.42 -> 2 px (int)
+    CHECK(g_rec.Has("M2,0"));
+    g_rec.Clear();
+    Frame(1056);                       // 33 ms: dt60 = 1.98 -> 11 px (int)
+    CHECK(g_rec.Has("M11,0"));
+
+    // --- dt-scaled held-attack steering ------------------------------------
+    Restart();
+    Config::Get().motionMelee = true;
+    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
+    Frame(1000);
+    XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
+    Frame(1010);
+    CHECK(g_rec.Has("BL:1"));
+    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
+    Frame(1020);                       // dt = 10 ms: raw = 2*40*0.6 = 48
+    CHECK(g_rec.Has("M47,0")); // dt=10ms: 2*40*0.6 = 48.0f -> 47 (truncation)
+    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
+    Frame(1027);                       // dt = 7 ms: raw = 2*40*0.42 = 33 (not clamped)
+    CHECK(g_rec.Has("M33,0"));
 
     // --- grip block hold-time ----------------------------------------------
     Restart();
