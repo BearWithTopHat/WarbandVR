@@ -196,6 +196,15 @@ int main()
     CHECK(Fake::CountContaining("SetTransform", "_41=0.0320") > 0 ||
           Fake::CountContaining("SetTransform", "_41=-0.0320") > 0);
 
+    // --- dirty tracking: only the first eye of the first pair applies ------
+    StereoRenderer::Get().OnReset(&dev, nullptr); // clear dirty flags
+    hkSetRenderTarget(&dev, 0, bb);
+    hkBeginScene(&dev);
+    Fake::Clear();
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
+    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
+    CHECK(Fake::Count("SetViewport") == 1);
+
     // --- game's own offscreen RT passes through untouched -----------------
     Fake::Clear();
     FakeSurface shadowMap(256, 256);
@@ -290,7 +299,7 @@ int main()
     hkSetScissorRect(&dev, &sr);
     Fake::Clear();
     hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
-    CHECK(Fake::Count("SetScissorRect") == 3); // eye0, eye1, restore game rect
+    CHECK(Fake::Count("SetScissorRect") == 2); // one apply + one restore
     CHECK(dev.hasScissor);
     CHECK(dev.scissor.left == 10 && dev.scissor.right == 300);
 

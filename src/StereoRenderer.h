@@ -189,6 +189,15 @@ private:
     unsigned long long m_lastViewChangeTick = 0;
     bool               m_recenterKeyDown    = false;
 
+    // Per-eye dirty tracking: RestoreGameState puts the game's own viewport
+    // and scissor back after every pair, so re-applying identical values on
+    // the next pair is pure overhead. Skip them when unchanged (the device
+    // is already in that state).
+    D3DVIEWPORT9 m_lastAppliedVp      = {};
+    bool         m_hasLastAppliedVp   = false;
+    RECT         m_lastAppliedScissor = {};
+    bool         m_hasLastAppliedScissor = false;
+
     // Perf accumulators (reported every 600 frames at LogLevel>=2)
     double             m_dupTimeUs   = 0.0;
     int                m_dupCalls    = 0;

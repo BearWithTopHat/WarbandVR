@@ -180,6 +180,8 @@ void StereoRenderer::ReleaseResources()
     if (m_vignetteTex) { m_vignetteTex->Release(); m_vignetteTex = nullptr; }
     m_vignetteFailed = false;
     ReleaseEyeTargets();
+    m_hasLastAppliedVp = false;
+    m_hasLastAppliedScissor = false;
     m_eyeW = m_eyeH = 0;
     m_curRT = nullptr;
     m_curRTIsMain = false;
@@ -516,7 +518,19 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
 
 void StereoRenderer::SetCurrentRT(IDirect3DSurface9* surf)
 {
-    if (surf == m_curRT) return;
+    if (surf == m_curRT)
+    {
+        // Early-out must still refresh the main-size flag: after a Reset the
+        // eye targets are recreated, and without this the flag would stay
+        // stale (mono) until some *different* RT came along.
+        if (surf && m_eyeW != 0)
+        {
+            D3DSURFACE_DESC d{};
+            if (SUCCEEDED(surf->GetDesc(&d)))
+                m_curRTIsMain = (d.Width == m_eyeW && d.Height == m_eyeH);
+        }
+        return;
+    }
     m_curRT = surf;
     m_curRTIsMain = false;
     if (!surf || m_eyeW == 0) return;
@@ -696,7 +710,8 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
     }
 
     // Viewport: the game's intended viewport, used as-is - each eye target
-    // is game-sized, so no per-eye offset is needed anywhere.
+    // is game-sized, so no per-eye offset is needed anywhere. Only re-apply
+    // when it changed; RestoreGameState leaves the device on the same value.
     D3DVIEWPORT9 vp;
     if (m_hasGameVp) vp = m_gameVp;
     else
@@ -706,7 +721,12 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         vp.Height = m_eyeH;
         vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
     }
-    device->SetViewport(&vp);
+    if (!m_hasLastAppliedVp || memcmp(&m_lastAppliedVp, &vp, sizeof(vp)) != 0)
+    {
+        device->SetViewport(&vp);
+        m_lastAppliedVp = vp;
+        m_hasLastAppliedVp = true;
+    }
 
     if (cfg.noZTest)
         device->SetRenderState(D3DRS_ZENABLE, FALSE); // diagnostic: bypass depth
@@ -716,7 +736,12 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
     {
         RECT r = m_hasScissor ? m_gameScissor
                               : RECT{ 0, 0, static_cast<LONG>(m_eyeW), static_cast<LONG>(m_eyeH) };
-        device->SetScissorRect(&r);
+        if (!m_hasLastAppliedScissor || memcmp(&m_lastAppliedScissor, &r, sizeof(r)) != 0)
+        {
+            device->SetScissorRect(&r);
+            m_lastAppliedScissor = r;
+            m_hasLastAppliedScissor = true;
+        }
     }
 
     // Samplers bound to the ACTIVE shadow pass's surface get this eye's copy
