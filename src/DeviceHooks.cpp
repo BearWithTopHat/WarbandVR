@@ -16,6 +16,40 @@
 // ---------------------------------------------------------------------------
 namespace
 {
+    // TEMP DIAG: which draw entry point the current draw came through.
+    const char* g_method = "?";
+    unsigned g_scenesThisFrame = 0;
+
+    // TEMP DIAG: dump the first vertices of a tiny draw (text-quad hunting).
+    // VB path: works only for lockable (managed/dynamic) buffers; UP path is
+    // read directly in the hook.
+    void PeekStream0(IDirect3DDevice9* dev, int primCount)
+    {
+        IDirect3DVertexBuffer9* vb = nullptr;
+        UINT offset = 0, stride = 0;
+        if (FAILED(dev->GetStreamSource(0, &vb, &offset, &stride)) || !vb || !stride)
+        {
+            if (vb) vb->Release();
+            return;
+        }
+        void* p = nullptr;
+        if (SUCCEEDED(vb->Lock(offset, stride * 2, &p, D3DLOCK_READONLY)) && p)
+        {
+            const float* f = static_cast<const float*>(p);
+            LOG_INFO("RB VB0 pc=%d stride=%u v0=(%.1f %.1f %.1f %.1f | %.3f %.3f %.3f %.3f) v1=(%.1f %.1f %.1f %.1f | %.3f %.3f %.3f %.3f)",
+                     primCount, stride,
+                     f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7],
+                     f[8], f[9], f[10], f[11], f[12], f[13], f[14], f[15]);
+            vb->Unlock();
+        }
+        else
+        {
+            static bool s_lockFailed = false;
+            if (!s_lockFailed) { s_lockFailed = true; LOG_INFO("RB VB0 pc=%d: VB not lockable", primCount); }
+        }
+        vb->Release();
+    }
+
     // 2D / fullscreen-quad path: draw into BOTH eye targets without any view
     // or projection shift. UI and the engine's composite quads stay flat and
     // identical in both eyes.
@@ -58,6 +92,67 @@ namespace
         if (savedRT) savedRT->Release();
         if (savedDS) savedDS->Release();
         return FAILED(hrL) ? hrL : hrR;
+    }
+
+    // TEMP DIAG: full-state dump of one draw (tooltip hunt). Used on the
+    // mono-UI path under stereo AND on the pure passthrough path when stereo
+    // is off, so both modes can be diffed directly.
+    void LogMonoDraw(IDirect3DDevice9* dev, int primCount)
+    {
+        D3DVIEWPORT9 vpNow{};
+        dev->GetViewport(&vpNow);
+        IDirect3DBaseTexture9* tex[4] = {};
+        for (int s = 0; s < 4; ++s) dev->GetTexture(s, &tex[s]);
+        IDirect3DPixelShader9* ps = nullptr;
+        IDirect3DVertexShader9* vs = nullptr;
+        dev->GetPixelShader(&ps);
+        dev->GetVertexShader(&vs);
+        DWORD zen = 0, zf = 0, zw = 0, abe = 0, sb = 0, db = 0, scis = 0;
+        dev->GetRenderState(D3DRS_ZENABLE, &zen);
+        dev->GetRenderState(D3DRS_ZFUNC, &zf);
+        dev->GetRenderState(D3DRS_ZWRITEENABLE, &zw);
+        dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &abe);
+        dev->GetRenderState(D3DRS_SRCBLEND, &sb);
+        dev->GetRenderState(D3DRS_DESTBLEND, &db);
+        dev->GetRenderState(D3DRS_SCISSORTESTENABLE, &scis);
+        IDirect3DSurface9* ds = nullptr;
+        dev->GetDepthStencilSurface(&ds);
+        UINT dsw = 0, dsh = 0;
+        if (ds)
+        {
+            D3DSURFACE_DESC dd{};
+            ds->GetDesc(&dd);
+            dsw = dd.Width; dsh = dd.Height;
+            ds->Release();
+        }
+        IDirect3DSurface9* rt0 = nullptr;
+        dev->GetRenderTarget(0, &rt0);
+        UINT rtw = 0, rth = 0;
+        if (rt0)
+        {
+            D3DSURFACE_DESC rd{};
+            rt0->GetDesc(&rd);
+            rtw = rd.Width; rth = rd.Height;
+            rt0->Release();
+        }
+        LOG_INFO("RB %s pc=%d vp=%ux%u rt0=%ux%u ds=%ux%u t0=%p t1=%p t2=%p t3=%p ps=%p vs=%p zen=%lu zf=%lu zw=%lu ab=%lu sb=%lu db=%lu scis=%lu",
+                 g_method, primCount, vpNow.Width, vpNow.Height, rtw, rth, dsw, dsh,
+                 static_cast<void*>(tex[0]), static_cast<void*>(tex[1]),
+                 static_cast<void*>(tex[2]), static_cast<void*>(tex[3]),
+                 static_cast<void*>(ps), static_cast<void*>(vs),
+                 zen, zf, zw, abe, sb, db, scis);
+        if (zen == 0 && primCount == 2)
+            StereoRenderer::Get().NoteZen0Texture(tex[0]);
+        if (zen == 1 && primCount == 1)
+            StereoRenderer::Get().NoteZen1Texture(tex[0]);
+
+        for (auto* t : tex) if (t) t->Release();
+        if (ps) ps->Release();
+        if (vs) vs->Release();
+
+        // Vertex peek for tiny draws (text quads, tooltip parts).
+        if (primCount > 0 && primCount <= 2)
+            PeekStream0(dev, primCount);
     }
 
     // Execute one game draw call for both eyes, each into its own game-sized
@@ -105,7 +200,7 @@ namespace
         if (decision == DupDecision::FlatBothHalves)
         {
             if (StereoRenderer::Get().RbLogActive())
-                LOG_INFO("RB MONOUI pc=%d", primCount);
+                LogMonoDraw(dev, primCount);
             return DrawMonoBothHalves(dev, draw);
         }
 
@@ -188,6 +283,9 @@ HRESULT __stdcall hkReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
 HRESULT __stdcall hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT* d, HWND w, const RGNDATA* r)
 {
     if (DeviceHooks::Get().m_internal) return dev->Present(s, d, w, r);
+    if (StereoRenderer::Get().RbLogActive() && g_scenesThisFrame != 1)
+        LOG_INFO("RB frame: scenes=%u", g_scenesThisFrame); // TEMP DIAG: multi-scene frames
+    g_scenesThisFrame = 0;
     if (StereoOn())
     {
         InternalScope g;
@@ -218,6 +316,14 @@ HRESULT __stdcall hkSetRenderTarget(IDirect3DDevice9* dev, DWORD idx, IDirect3DS
         }
         StereoRenderer::Get().SetCurrentRT(surf);
         Capture::Trace("SetRenderTarget(%u, %p)", idx, surf);
+        if (StereoRenderer::Get().RbLogActive() && surf) // TEMP DIAG: RT binds
+        {
+            D3DSURFACE_DESC d{};
+            surf->GetDesc(&d);
+            LOG_INFO("RB SetRT0 %p %ux%u fmt=%d main=%d", static_cast<void*>(surf),
+                     d.Width, d.Height, d.Format,
+                     StereoRenderer::Get().CurrentRTIsMain() ? 1 : 0);
+        }
     }
     return dev->SetRenderTarget(idx, surf);
 }
@@ -234,6 +340,7 @@ HRESULT __stdcall hkBeginScene(IDirect3DDevice9* dev)
     if (DeviceHooks::Get().m_internal) return dev->BeginScene();
     Capture::Trace("BeginScene");
     Capture::BeginFrame();
+    if (StereoRenderer::Get().RbLogActive()) ++g_scenesThisFrame; // TEMP DIAG
     HRESULT hr = dev->BeginScene();
     if (SUCCEEDED(hr))
     {
@@ -263,13 +370,23 @@ HRESULT __stdcall hkClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rec
         return dev->Clear(count, rects, flags, color, z, stencil);
     Capture::Trace("Clear(count=%u rects=%p flags=0x%X z=%.2f)", count, rects, flags, z);
 
-    // The game clears its own target - pass through as-is. The eye targets
-    // are cleared by StereoRenderer once per frame. (M2 shadow passes are
-    // the one exception: their per-eye targets need per-eye clears.)
+    // M2 shadow passes: their per-eye targets need per-eye clears.
     if (StereoRenderer::Get().ShadowActive())
     {
         InternalScope g;
         return StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
+    }
+
+    // A main-frame clear must reach the eye targets too, not just the game's
+    // own buffers: render contexts that clear depth before drawing (e.g. the
+    // world-map tooltip) would otherwise leave the per-eye depth buffers
+    // holding stale scene depth, and the depth-tested UI text they precede
+    // gets killed (invisible tooltip text). Clear the game's target as well
+    // so mono-path draws testing the game DS see the same state as stock.
+    if (StereoRenderer::Get().CurrentRTIsMain())
+    {
+        InternalScope g;
+        StereoRenderer::Get().ClearBothEyes(dev, count, rects, flags, color, z, stencil);
     }
     return dev->Clear(count, rects, flags, color, z, stencil);
 }
@@ -321,6 +438,33 @@ HRESULT __stdcall hkSetTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBase
     // swap in the per-eye copy (cheap no-op when no shadows exist).
     if (!DeviceHooks::Get().m_internal && StereoOn())
         StereoRenderer::Get().OnGameSetTexture(stage, tex);
+
+    // TEMP DIAG: ground-truth bind log (GetTexture readbacks proved useless -
+    // this logs the actual bind CALLS). Dedupes consecutive repeats.
+    if (StereoRenderer::Get().RbLogActive() && !DeviceHooks::Get().m_internal)
+    {
+        static DWORD s_lastStage = 0xFFFFFFFF;
+        static IDirect3DBaseTexture9* s_lastTex = nullptr;
+        if (stage != s_lastStage || tex != s_lastTex)
+        {
+            s_lastStage = stage;
+            s_lastTex = tex;
+            UINT w = 0, h = 0;
+            D3DFORMAT fmt = D3DFMT_UNKNOWN;
+            if (tex)
+            {
+                IDirect3DTexture9* t9 = nullptr;
+                if (SUCCEEDED(tex->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&t9))) && t9)
+                {
+                    D3DSURFACE_DESC d{};
+                    t9->GetLevelDesc(0, &d);
+                    w = d.Width; h = d.Height; fmt = d.Format;
+                    t9->Release();
+                }
+            }
+            LOG_INFO("RB BIND s%lu %p %ux%u fmt=%d", stage, static_cast<void*>(tex), w, h, fmt);
+        }
+    }
     return dev->SetTexture(stage, tex);
 }
 
@@ -339,10 +483,17 @@ HRESULT __stdcall hkSetScissorRect(IDirect3DDevice9* dev, const RECT* rect)
 
 HRESULT __stdcall hkDrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT start, UINT count)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
+    if (DeviceHooks::Get().m_internal)
         return dev->DrawPrimitive(type, start, count);
+    if (!StereoOn())
+    {
+        // TEMP DIAG: stock-mode draw capture for stereo-vs-stock diffs.
+        if (StereoRenderer::Get().RbLogActive()) { g_method = "DP"; LogMonoDraw(dev, static_cast<int>(count)); }
+        return dev->DrawPrimitive(type, start, count);
+    }
     if (Capture::TraceActive())
         Capture::Trace("DrawPrimitive(type=%d start=%u count=%u)", type, start, count);
+    g_method = "DP";
     return DrawBothEyes(dev, static_cast<int>(count),
                         [&] { return dev->DrawPrimitive(type, start, count); });
 }
@@ -350,20 +501,46 @@ HRESULT __stdcall hkDrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, 
 HRESULT __stdcall hkDrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex,
                                          UINT minIndex, UINT numVertices, UINT startIndex, UINT count)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
+    if (DeviceHooks::Get().m_internal)
         return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count);
+    if (!StereoOn())
+    {
+        if (StereoRenderer::Get().RbLogActive()) { g_method = "DIP"; LogMonoDraw(dev, static_cast<int>(count)); }
+        return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count);
+    }
     if (Capture::TraceActive())
         Capture::Trace("DrawIndexedPrimitive(type=%d numVerts=%u count=%u) rhw=%d", type, numVertices, count,
                        DeviceHooks::Get().CurrentDrawIsRHW() ? 1 : 0);
+    g_method = "DIP";
     return DrawBothEyes(dev, static_cast<int>(count), [&] {
         return dev->DrawIndexedPrimitive(type, baseVertex, minIndex, numVertices, startIndex, count); });
+}
+
+// TEMP DIAG: read UP vertex data directly (no VB lock needed).
+static void PeekUpVertices(const char* m, const void* data, UINT stride, UINT count)
+{
+    if (!StereoRenderer::Get().RbLogActive() || !data || !stride) return;
+    const float* f = static_cast<const float*>(data);
+    LOG_INFO("RB UPVERT %s stride=%u v0=(%.1f %.1f %.1f %.1f | %.3f %.3f %.3f %.3f) v1=(%.1f %.1f %.1f %.1f | %.3f %.3f %.3f %.3f)",
+             m, stride,
+             f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7],
+             f[stride/4], f[stride/4+1], f[stride/4+2], f[stride/4+3],
+             f[stride/4+4], f[stride/4+5], f[stride/4+6], f[stride/4+7]);
+    (void)count;
 }
 
 HRESULT __stdcall hkDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT count,
                                     const void* data, UINT stride)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
+    if (DeviceHooks::Get().m_internal)
         return dev->DrawPrimitiveUP(type, count, data, stride);
+    if (!StereoOn())
+    {
+        if (StereoRenderer::Get().RbLogActive()) { g_method = "DPUP"; LogMonoDraw(dev, static_cast<int>(count)); }
+        return dev->DrawPrimitiveUP(type, count, data, stride);
+    }
+    if (count <= 8) PeekUpVertices("DPUP", data, stride, count);
+    g_method = "DPUP";
     return DrawBothEyes(dev, static_cast<int>(count),
                         [&] { return dev->DrawPrimitiveUP(type, count, data, stride); });
 }
@@ -373,8 +550,15 @@ HRESULT __stdcall hkDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETY
                                            const void* indexData, D3DFORMAT indexFormat,
                                            const void* vertexData, UINT stride)
 {
-    if (DeviceHooks::Get().m_internal || !StereoOn())
+    if (DeviceHooks::Get().m_internal)
         return dev->DrawIndexedPrimitiveUP(type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride);
+    if (!StereoOn())
+    {
+        if (StereoRenderer::Get().RbLogActive()) { g_method = "DIPUP"; LogMonoDraw(dev, static_cast<int>(count)); }
+        return dev->DrawIndexedPrimitiveUP(type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride);
+    }
+    if (count <= 8) PeekUpVertices("DIPUP", vertexData, stride, count);
+    g_method = "DIPUP";
     return DrawBothEyes(dev, static_cast<int>(count), [&] {
         return dev->DrawIndexedPrimitiveUP(type, minVertex, numVertices, count, indexData, indexFormat, vertexData, stride); });
 }

@@ -72,6 +72,25 @@ public:
     // TEMP DIAG: F9-triggered per-draw logging (DrawBothEyes feeds primCount).
     bool RbLogActive() const { return m_rbLog; }
     void SetLogPrimCount(int pc) { m_logPrimCount = pc; }
+    // TEMP DIAG: F10 dumps eyes + pre-composite backbuffer at next Present.
+    bool TakePresentDumpRequest() { const bool r = m_dumpAtPresent; m_dumpAtPresent = false; return r; }
+    // TEMP DIAG: remember the texture of the LAST pc=2 zen=0 draw each frame
+    // (the tooltip foreground quad draws last; sky draws earlier).
+    void NoteZen0Texture(IDirect3DBaseTexture9* tex);
+    void NoteZen1Texture(IDirect3DBaseTexture9* tex); // last pc=1 zen=1 draw
+    void DumpNotedZen0Texture(IDirect3DDevice9* device); // called at present after F9 toggle-off
+    void DumpNextSmallRT(IDirect3DDevice9* device); // one RT per present (driver-safe)
+    // TEMP DIAG: paint the noted small RTs onto the backbuffer as an on-screen
+    // debug overlay (GPU copies only; readbacks reset the device).
+    void ShowSmallRTsOnScreen(IDirect3DDevice9* device);
+    bool TakeRTDumpRequest() { const bool r = m_dumpRTsAtPresent; m_dumpRTsAtPresent = false; return r; }
+    // TEMP DIAG: small offscreen RTs seen while RB logging (tooltip text is
+    // rendered into one of these); dumped on F9 toggle-off.
+    void NoteSmallRT(IDirect3DSurface9* surf);
+    IDirect3DBaseTexture9* m_zen0Tex = nullptr;
+    IDirect3DBaseTexture9* m_zen1Tex = nullptr;
+    std::vector<IDirect3DSurface9*> m_smallRTs;
+    size_t m_rtDumpIdx = 0;
 
     // Matrix capture (fed by the SetTransform / VS-constant hooks)
     void CaptureViewMatrix(const D3DMATRIX& m);
@@ -141,8 +160,13 @@ private:
 
     // Debug: dump eye surfaces to BMPs ([Debug] DumpFrames).
     void DumpStereoSurface(IDirect3DDevice9* device, int index);
+    // Debug: dump the backbuffer BEFORE compositing (catches content the game
+    // drew directly to it, e.g. GDI-rendered tooltip text).
+    void DumpBackbuffer(IDirect3DDevice9* device, int index);
     int  m_dumpedFrames = 0;
     unsigned m_presentCount = 0;
+    bool m_dumpAtPresent = false;
+    bool m_dumpRTsAtPresent = false;
 
     IDirect3DSurface9* m_eyeSurf[2] = { nullptr, nullptr };  // per-eye game-sized RTs
     IDirect3DSurface9* m_eyeDS[2]   = { nullptr, nullptr };  // per-eye game-sized depth

@@ -18,7 +18,12 @@ struct Config
     int   uiMaxTriangles        = 64;     // "tiny" threshold
     float uiZScaleMax           = 0.5f;   // |_33| below this => ortho UI matrix
     float uiWScaleEps           = 0.01f;  // |_44 - 1| within this => affine UI
-    float uiRowNormMax          = 0.5f;   // 3x3 row norm below this => not a
+    float uiRowNormMax          = 8.0f;   // flat-UI gate: 3x3 row norms of the
+                                          // projection must be BELOW this to
+                                          // count as ortho UI. Warband's UI
+                                          // orthos run 2.0-4.7 (sub-region
+                                          // cameras); real 3D views are
+                                          // orthonormal (~1) and stay stereo.
                                           // rotation (steep-pitch view guard)
     bool  offscreenPasses       = false;  // M2: per-eye shadows for the game's
                                           // own render passes (UNTESTED - keep

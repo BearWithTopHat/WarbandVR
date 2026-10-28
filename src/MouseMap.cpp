@@ -91,6 +91,22 @@ namespace
     ScreenToClient_t g_origScreenToClient = nullptr;
     int g_loggedS2C = 0;
 
+    // TEMP DIAG: observe raw GetCursorPos polling (tooltip-layout probe).
+    typedef BOOL(WINAPI* GetCursorPos_t)(LPPOINT);
+    GetCursorPos_t g_origGetCursorPos = nullptr;
+    int g_loggedGCP = 0;
+
+    BOOL WINAPI GetCursorPos_Hook(LPPOINT pt)
+    {
+        const BOOL ok = g_origGetCursorPos(pt);
+        if (ok && pt && Config::Get().enableStereo && StereoRenderer::Get().RbLogActive() && g_loggedGCP < 40)
+        {
+            ++g_loggedGCP;
+            LOG_INFO("MouseMap: GetCursorPos -> (%ld,%ld)", pt->x, pt->y);
+        }
+        return ok;
+    }
+
     BOOL RemapActive(UINT* eyeW, UINT* eyeH)
     {
         const Config& cfg = Config::Get();
@@ -107,6 +123,23 @@ namespace
 
         UINT eyeW = 0, eyeH = 0;
         if (!RemapActive(&eyeW, &eyeH)) return ok;
+
+        // Only remap when the converted point IS the live cursor position.
+        // The game also calls ScreenToClient for layout/clamping math (the
+        // map tooltip does); remapping those displaces the drawn content.
+        POINT cur{};
+        if (!GetCursorPos(&cur)) return ok;
+        POINT clientCur = cur;
+        if (!g_origScreenToClient(hwnd, &clientCur)) return ok;
+        if (labs(pt->x - clientCur.x) > 2 || labs(pt->y - clientCur.y) > 2)
+        {
+            if (g_loggedS2C < 20)
+            {
+                ++g_loggedS2C;
+                LOG_INFO("MouseMap: ScreenToClient passthrough (non-cursor point %ld,%ld)", pt->x, pt->y);
+            }
+            return ok;
+        }
 
         RECT rc{};
         GetClientRect(hwnd, &rc);
@@ -183,4 +216,10 @@ void MouseMap::InstallPollingHooks()
                  patched == 1 ? "y" : "ies");
     else
         LOG_WARN("MouseMap: ScreenToClient IAT entry not found - menu clicks will stay unmapped");
+
+    // Observation-only GetCursorPos hook (does not remap).
+    const int gcp = PatchIat("user32.dll", "GetCursorPos",
+                             reinterpret_cast<void*>(&GetCursorPos_Hook),
+                             reinterpret_cast<void**>(&g_origGetCursorPos));
+    LOG_INFO("MouseMap: GetCursorPos IAT %s (%d)", gcp > 0 ? "hooked" : "not found", gcp);
 }

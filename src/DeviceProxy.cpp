@@ -9,6 +9,7 @@
 #include "DeviceProxy.h"
 #include "DeviceHooks.h"
 #include "Logger.h"
+#include "StereoRenderer.h"
 
 DeviceProxy::DeviceProxy(IDirect3DDevice9* real)
     : m_real(real), m_refCount(1)
@@ -134,6 +135,8 @@ HRESULT __stdcall DeviceProxy::SetCursorProperties(UINT XHotSpot, UINT YHotSpot,
 
 HRESULT __stdcall DeviceProxy::CreateAdditionalSwapChain(D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DSwapChain9** pSwapChain)
 {
+    static bool s_loggedSC = false;
+    if (!s_loggedSC) { s_loggedSC = true; LOG_INFO("DeviceProxy: game creates an additional swap chain"); }
     return m_real->CreateAdditionalSwapChain(pPresentationParameters, pSwapChain);
 }
 
@@ -169,7 +172,13 @@ HRESULT __stdcall DeviceProxy::SetDialogBoxMode(BOOL bEnableDialogs)
 
 HRESULT __stdcall DeviceProxy::CreateTexture(UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture9** ppTexture, HANDLE* pSharedHandle)
 {
-    return m_real->CreateTexture(Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
+    HRESULT hr = m_real->CreateTexture(Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
+    // TEMP DIAG: tooltip text upload path hunting (F9-gated).
+    if (StereoRenderer::Get().RbLogActive())
+        LOG_INFO("RB CreateTexture %ux%u fmt=%d usage=0x%lX pool=%d hr=0x%08X tex=%p",
+                 Width, Height, Format, Usage, Pool, hr,
+                 (SUCCEEDED(hr) && ppTexture) ? static_cast<void*>(*ppTexture) : nullptr);
+    return hr;
 }
 
 HRESULT __stdcall DeviceProxy::CreateVolumeTexture(UINT Width, UINT Height, UINT Depth, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DVolumeTexture9** ppVolumeTexture, HANDLE* pSharedHandle)
@@ -204,11 +213,34 @@ HRESULT __stdcall DeviceProxy::CreateDepthStencilSurface(UINT Width, UINT Height
 
 HRESULT __stdcall DeviceProxy::UpdateSurface(IDirect3DSurface9* pSourceSurface, CONST RECT* pSourceRect, IDirect3DSurface9* pDestinationSurface, CONST POINT* pDestPoint)
 {
+    // TEMP DIAG: tooltip text upload path hunting (F9-gated).
+    if (StereoRenderer::Get().RbLogActive())
+    {
+        D3DSURFACE_DESC sd{}, dd{};
+        if (pSourceSurface) pSourceSurface->GetDesc(&sd);
+        if (pDestinationSurface) pDestinationSurface->GetDesc(&dd);
+        LOG_INFO("RB UpdateSurface src=%p %ux%u fmt=%d pool=%d -> dst=%p %ux%u fmt=%d pool=%d",
+                 static_cast<void*>(pSourceSurface), sd.Width, sd.Height, sd.Format, sd.Pool,
+                 static_cast<void*>(pDestinationSurface), dd.Width, dd.Height, dd.Format, dd.Pool);
+    }
     return m_real->UpdateSurface(pSourceSurface, pSourceRect, pDestinationSurface, pDestPoint);
 }
 
 HRESULT __stdcall DeviceProxy::UpdateTexture(IDirect3DBaseTexture9* pSourceTexture, IDirect3DBaseTexture9* pDestinationTexture)
 {
+    // TEMP DIAG: tooltip text upload path hunting (F9-gated).
+    if (StereoRenderer::Get().RbLogActive())
+    {
+        IDirect3DTexture9* st = nullptr;
+        IDirect3DTexture9* dt = nullptr;
+        if (pSourceTexture) pSourceTexture->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&st));
+        if (pDestinationTexture) pDestinationTexture->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&dt));
+        D3DSURFACE_DESC sd{}, dd{};
+        if (st) { st->GetLevelDesc(0, &sd); st->Release(); }
+        if (dt) { dt->GetLevelDesc(0, &dd); dt->Release(); }
+        LOG_INFO("RB UpdateTexture src=%ux%u fmt=%d pool=%d -> dst=%ux%u fmt=%d pool=%d",
+                 sd.Width, sd.Height, sd.Format, sd.Pool, dd.Width, dd.Height, dd.Format, dd.Pool);
+    }
     return m_real->UpdateTexture(pSourceTexture, pDestinationTexture);
 }
 
@@ -224,6 +256,18 @@ HRESULT __stdcall DeviceProxy::GetFrontBufferData(UINT iSwapChain, IDirect3DSurf
 
 HRESULT __stdcall DeviceProxy::StretchRect(IDirect3DSurface9* pSourceSurface, CONST RECT* pSourceRect, IDirect3DSurface9* pDestSurface, CONST RECT* pDestRect, D3DTEXTUREFILTERTYPE Filter)
 {
+    // TEMP DIAG: tooltip text may be blitted, not drawn (F9-gated).
+    if (StereoRenderer::Get().RbLogActive())
+    {
+        D3DSURFACE_DESC sd{}, dd{};
+        if (pSourceSurface) pSourceSurface->GetDesc(&sd);
+        if (pDestSurface) pDestSurface->GetDesc(&dd);
+        LOG_INFO("RB StretchRect src=%p %ux%u -> dst=%p %ux%u dstRect=%ld,%ld-%ld,%ld",
+                 static_cast<void*>(pSourceSurface), sd.Width, sd.Height,
+                 static_cast<void*>(pDestSurface), dd.Width, dd.Height,
+                 pDestRect ? pDestRect->left : -1L, pDestRect ? pDestRect->top : -1L,
+                 pDestRect ? pDestRect->right : -1L, pDestRect ? pDestRect->bottom : -1L);
+    }
     return m_real->StretchRect(pSourceSurface, pSourceRect, pDestSurface, pDestRect, Filter);
 }
 
@@ -349,9 +393,13 @@ HRESULT __stdcall DeviceProxy::GetRenderState(D3DRENDERSTATETYPE State, DWORD* p
 
 HRESULT __stdcall DeviceProxy::CreateStateBlock(D3DSTATEBLOCKTYPE Type, IDirect3DStateBlock9** ppSB)
 {
+    // State blocks bypass our per-call interception when they Apply: textures
+    // / RT / viewport captured in a block change the real device without us
+    // seeing it. Knowing whether the game uses them matters for diagnosis.
+    static bool s_loggedSB = false;
+    if (!s_loggedSB) { s_loggedSB = true; LOG_INFO("DeviceProxy: game creates state blocks (type=%d)", (int)Type); }
     return m_real->CreateStateBlock(Type, ppSB);
 }
-
 HRESULT __stdcall DeviceProxy::BeginStateBlock()
 {
     return m_real->BeginStateBlock();
