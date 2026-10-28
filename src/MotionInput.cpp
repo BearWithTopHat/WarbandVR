@@ -142,6 +142,9 @@ namespace
     unsigned long long g_l3Since = 0;
     bool   g_l3Cancelled = false;
     bool   g_l3Fired = false;
+    // Frame-time state for dt-scaled injection (file scope so Shutdown can
+    // reset it; function-static would be unreachable there).
+    unsigned long long s_lastFrameMs = 0;
 
     using Melee::AttackDir;
     using Melee::DIR_LEFT; using Melee::DIR_RIGHT;
@@ -323,7 +326,7 @@ namespace
     // While an attack is held, steer the swing with live hand motion
     // (Warband steers a held attack from mouse movement). With MotionSteer=0
     // this degrades to a plain click (release next frame).
-    void SteerAttack(const Config& cfg, unsigned long long now)
+    void SteerAttack(const Config& cfg, unsigned long long now, float dt60)
     {
         if (!g_attackActive) return;
 
@@ -348,14 +351,16 @@ namespace
         Melee::VelocityToView(v, headYaw, &vRight, &vUp);
 
         int dx = 0, dy = 0;
-        Melee::SteerDelta(vRight, vUp, cfg.steerScale, cfg.steerMaxDeltaPx, &dx, &dy);
+        // dt60 scales steering rate to a 60 fps reference so held-attack
+        // steering feels identical at any frame rate (WSE2-fixed class).
+        Melee::SteerDelta(vRight, vUp, cfg.steerScale * dt60, cfg.steerMaxDeltaPx, &dx, &dy);
         SendMouseMove(dx, dy);
     }
 
     // -------------------------------------------------------------------------
     // Layer 1: controller -> kb/mouse emulation
     // -------------------------------------------------------------------------
-    void Emulate(const Config& cfg)
+    void Emulate(const Config& cfg, float dt60)
     {
         // Left stick -> WASD
         float lx = 0, ly = 0;
@@ -370,7 +375,10 @@ namespace
 
         // Right stick -> snap turn (h2-mod-vr style comfort option) or
         // smooth mouse look, per config. Snap is edge-triggered with a
-        // return-to-centre re-arm.
+        // return-to-centre re-arm. Look deltas are scaled by frame time
+        // (dt60 = dt * 60): Warband's input is frame-rate dependent (WSE2
+        // fixed the same class), and the VR cadence differs from vanilla.
+        const float lookScale = cfg.mouseSpeed * dt60;
         float rx = 0, ry = 0;
         if (ReadVec2(g_stick, RIGHT, &rx, &ry))
         {
@@ -386,11 +394,11 @@ namespace
                 }
                 // stick Y still does smooth pitch
                 if (fabsf(ry) > dz)
-                    SendMouseMove(0, (int)(ry * cfg.mouseSpeed));
+                    SendMouseMove(0, (int)(ry * lookScale));
             }
             else if (fabsf(rx) > dz || fabsf(ry) > dz)
             {
-                SendMouseMove((int)(rx * cfg.mouseSpeed), (int)(ry * cfg.mouseSpeed));
+                SendMouseMove((int)(rx * lookScale), (int)(ry * lookScale));
             }
         }
 
@@ -428,9 +436,9 @@ namespace
     // -------------------------------------------------------------------------
     // Layer 2: swing classification + held-attack steering
     // -------------------------------------------------------------------------
-    void MeleeTick(const Config& cfg, unsigned long long now)
+    void MeleeTick(const Config& cfg, unsigned long long now, float dt60)
     {
-        SteerAttack(cfg, now);
+        SteerAttack(cfg, now, dt60);
 
         float v[3] = {};
         if (ReadHandVelocity(RIGHT, v))
@@ -860,6 +868,7 @@ void MotionInput::Shutdown()
     g_l3Since = 0;
     g_l3Cancelled = false;
     g_l3Fired = false;
+    s_lastFrameMs = 0; // dt state must not leak across session restarts
 
     for (int h = 0; h < 2; ++h)
         if (g_handSpace[h]) xrDestroySpace(g_handSpace[h]);
@@ -904,8 +913,19 @@ void MotionInput::OnFrame()
 
     const Config& cfg = Config::Get();
     unsigned long long nowMs = GetTickCount64();
-    if (cfg.emulateControllers) Emulate(cfg);
-    if (cfg.motionMelee)        MeleeTick(cfg, nowMs);
+    // Frame-time factor for all rate-based injection (dt * 60, clamped).
+    float dt = 1.0f / 60.0f;
+    if (s_lastFrameMs != 0)
+    {
+        const unsigned long long deltaMs = nowMs - s_lastFrameMs;
+        dt = deltaMs / 1000.0f;
+        if (dt > 0.1f) dt = 0.1f;          // hitch guard: cap a long frame
+        if (dt < 1.0f / 240.0f) dt = 1.0f / 240.0f;
+    }
+    s_lastFrameMs = nowMs;
+    const float dt60 = dt * 60.0f;
+    if (cfg.emulateControllers) Emulate(cfg, dt60);
+    if (cfg.motionMelee)        MeleeTick(cfg, nowMs, dt60);
     if (cfg.gestureGrab)        Gestures(cfg, nowMs);
 
     // Recenter chord (BannerlordVR lesson): no keyboard in a headset, so
