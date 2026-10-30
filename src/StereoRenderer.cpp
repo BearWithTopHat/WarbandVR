@@ -471,41 +471,6 @@ void StereoRenderer::OnPresent(IDirect3DDevice9* device)
     {
         DumpStereoSurface(device, m_dumpedFrames);
         DumpBackbuffer(device, m_dumpedFrames);
-
-        // TEMP DIAG (tooltip hunt): dump the texture bound to stage 0 - the
-        // tooltip's foreground quad samples the shared UI atlas, which the
-        // game GDI-renders text into.
-        IDirect3DBaseTexture9* t0 = nullptr;
-        if (SUCCEEDED(device->GetTexture(0, &t0)) && t0)
-        {
-            IDirect3DTexture9* tex = nullptr;
-            if (SUCCEEDED(t0->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&tex))) && tex)
-            {
-                HMODULE d3dx = GetModuleHandleA("d3dx9_42.dll");
-                if (!d3dx) d3dx = GetModuleHandleA("d3dx9_43.dll");
-                typedef HRESULT (WINAPI* SaveTex_t)(LPCSTR, UINT, IDirect3DBaseTexture9*, const void*);
-                SaveTex_t saveTex = d3dx
-                    ? reinterpret_cast<SaveTex_t>(GetProcAddress(d3dx, "D3DXSaveTextureToFileA"))
-                    : nullptr;
-                if (saveTex)
-                {
-                    char dllDir[MAX_PATH] = {};
-                    HMODULE self = nullptr;
-                    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                       reinterpret_cast<LPCSTR>(&WriteBmp), &self);
-                    GetModuleFileNameA(self, dllDir, MAX_PATH);
-                    char* slash = strrchr(dllDir, '\\');
-                    if (slash) slash[1] = '\0';
-                    char path[MAX_PATH];
-                    snprintf(path, MAX_PATH, "%.230sWarbandVR_frame%03d_tex0.bmp", dllDir, m_dumpedFrames);
-                    HRESULT hr = saveTex(path, 2 /*D3DXIFF_BMP*/, tex, nullptr); // NOLINT
-                    LOG_INFO("DumpTex0: %s hr=0x%08X", path, hr);
-                }
-                tex->Release();
-            }
-            t0->Release();
-        }
         ++m_dumpedFrames;
     }
 
@@ -768,19 +733,17 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
 // Per-eye application
 // ---------------------------------------------------------------------------
 
-// Second flat-UI family: matrices whose 3rd AND 4th rows carry no z/w
-// contribution at all (|_31|,|_32|,|_34|,|_33|,|_43| ~ 0). Warband's
-// screen-space text quads (map labels, the world-map tooltip mesh) use these:
-// rows 1-2 hold a pure 2D scale and the shader computes w itself, so _44 is 0
-// rather than 1 and the strict IsFlatOrtho w-check rejects them. 3D views
-// always have a nonzero rotation row (_31/_32), a perspective term (_34), or
-// a z translation (_43), so they stay excluded.
-static bool IsZeroRow34UI(const D3DMATRIX& m)
+// Second flat-UI family: rows 1 and 2 are AXIS-ALIGNED (pure scale, zero
+// off-diagonal), which is the shape of every Warband UI camera - menus, map
+// labels, and the world-map tooltip camera (which carries a perspective
+// m34=-1 term and w=4.75, so the strict IsFlatOrtho rejects it and the text
+// got eye-shifted out of its box). Scene cameras always rotate the view, so
+// their off-diagonal terms are nonzero and they stay stereo.
+static bool IsAxisAlignedUI(const D3DMATRIX& m)
 {
     const float e = 1e-3f;
-    return std::fabs(m._31) < e && std::fabs(m._32) < e
-        && std::fabs(m._34) < e && std::fabs(m._33) < 0.5f
-        && std::fabs(m._43) < e;
+    return std::fabs(m._12) < e && std::fabs(m._13) < e
+        && std::fabs(m._21) < e && std::fabs(m._23) < e;
 }
 
 void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
@@ -924,6 +887,29 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
                          vpNow.X, vpNow.Y, vpNow.Width, vpNow.Height,
                          m_gameVp.X, m_gameVp.Y, m_gameVp.Width, m_gameVp.Height);
                 if (vs) vs->Release();
+                // TEMP DIAG: full matrix for each DISTINCT camera per F9-on.
+                // Dedupe on rotation/projection (_11,_22,_33,_34,_44), NOT
+                // translation - object positions vary per draw, cameras don't.
+                static float s_seen[32][5];
+                static int s_seenCount = 0;
+                bool seen = false;
+                for (int s = 0; s < s_seenCount; ++s)
+                    if (std::fabs(s_seen[s][0] - rm._11) < 0.01f &&
+                        std::fabs(s_seen[s][1] - rm._22) < 0.01f &&
+                        std::fabs(s_seen[s][2] - rm._33) < 0.01f &&
+                        std::fabs(s_seen[s][3] - rm._34) < 0.01f &&
+                        std::fabs(s_seen[s][4] - rm._44) < 0.01f)
+                    { seen = true; break; }
+                if (!seen && s_seenCount < 32)
+                {
+                    s_seen[s_seenCount][0] = rm._11; s_seen[s_seenCount][1] = rm._22;
+                    s_seen[s_seenCount][2] = rm._33; s_seen[s_seenCount][3] = rm._34;
+                    s_seen[s_seenCount][4] = rm._44;
+                    ++s_seenCount;
+                    char buf[256];
+                    Mat::Format(rm, buf, sizeof(buf));
+                    LOG_INFO("FULLMAT pc=%d vs=%p%s", m_logPrimCount, static_cast<void*>(vs), buf);
+                }
             }
         }
 
@@ -931,7 +917,7 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
         const bool flatUI = !m_readbackPlausible
                          || Mat::IsFlatOrtho(m, cfg.uiZScaleMax, cfg.uiWScaleEps,
                                              cfg.uiRowNormMax)
-                         || IsZeroRow34UI(m);
+                         || IsAxisAlignedUI(m);
         m_uploadedThisPair = false;
         if (!flatUI)
         {
@@ -1237,62 +1223,6 @@ void StereoRenderer::DumpStereoSurface(IDirect3DDevice9* device, int index)
     }
 }
 
-// ---------------------------------------------------------------------------
-// TEMP DIAG: tooltip text texture dump (F9-gated, once per toggle)
-// ---------------------------------------------------------------------------
-
-void StereoRenderer::NoteZen0Texture(IDirect3DBaseTexture9* tex)
-{
-    if (tex == m_zen0Tex) return;
-    if (tex) tex->AddRef();
-    if (m_zen0Tex) m_zen0Tex->Release();
-    m_zen0Tex = tex;
-}
-
-void StereoRenderer::NoteZen1Texture(IDirect3DBaseTexture9* tex)
-{
-    if (tex == m_zen1Tex) return;
-    if (tex) tex->AddRef();
-    if (m_zen1Tex) m_zen1Tex->Release();
-    m_zen1Tex = tex;
-}
-
-namespace
-{
-    void DumpOneTexture(IDirect3DBaseTexture9* t, const char* name)
-    {
-        if (!t) return;
-        IDirect3DTexture9* tex = nullptr;
-        if (FAILED(t->QueryInterface(IID_IDirect3DTexture9, reinterpret_cast<void**>(&tex))) || !tex)
-            return;
-        D3DSURFACE_DESC td{};
-        tex->GetLevelDesc(0, &td);
-        HMODULE d3dx = GetModuleHandleA("d3dx9_42.dll");
-        typedef HRESULT (WINAPI* SaveTex_t)(LPCSTR, UINT, IDirect3DBaseTexture9*, const void*);
-        SaveTex_t saveTex = d3dx
-            ? reinterpret_cast<SaveTex_t>(GetProcAddress(d3dx, "D3DXSaveTextureToFileA"))
-            : nullptr;
-        HRESULT hr = E_FAIL;
-        if (saveTex)
-        {
-            char dllDir[MAX_PATH] = {};
-            HMODULE self = nullptr;
-            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               reinterpret_cast<LPCSTR>(&WriteBmp), &self);
-            GetModuleFileNameA(self, dllDir, MAX_PATH);
-            char* slash = strrchr(dllDir, '\\');
-            if (slash) slash[1] = '\0';
-            char path[MAX_PATH];
-            snprintf(path, MAX_PATH, "%.230sWarbandVR_%s.tga", dllDir, name);
-            hr = saveTex(path, 2 /*D3DXIFF_TGA*/, tex, nullptr); // NOLINT
-        }
-        LOG_INFO("DIAG: %s tex=%p %ux%u fmt=%d pool=%d hr=0x%08X",
-                 name, static_cast<void*>(t), td.Width, td.Height, td.Format, td.Pool, hr);
-        tex->Release();
-    }
-}
-
 void StereoRenderer::NoteSmallRT(IDirect3DSurface9* surf)
 {
     for (const auto* s : m_smallRTs)
@@ -1383,93 +1313,6 @@ void StereoRenderer::ShowSmallRTsOnScreen(IDirect3DDevice9* device)
     if (savedVS) savedVS->Release();
     if (savedRT) savedRT->Release();
     bb->Release();
-}
-
-void StereoRenderer::DumpNextSmallRT(IDirect3DDevice9* device)
-{
-    if (m_smallRTs.empty()) return;
-    IDirect3DSurface9* surf = m_smallRTs[m_rtDumpIdx % m_smallRTs.size()];
-    const int idx = static_cast<int>(m_rtDumpIdx % m_smallRTs.size());
-    ++m_rtDumpIdx;
-
-    D3DSURFACE_DESC d{};
-    surf->GetDesc(&d);
-    IDirect3DSurface9* sys = nullptr;
-    HRESULT hr = device->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format,
-                                                     D3DPOOL_SYSTEMMEM, &sys, nullptr);
-    if (SUCCEEDED(hr) && sys)
-        hr = device->GetRenderTargetData(surf, sys);
-    if (SUCCEEDED(hr) && sys)
-    {
-        D3DLOCKED_RECT lr{};
-        if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
-        {
-            char dllDir[MAX_PATH] = {};
-            HMODULE self = nullptr;
-            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               reinterpret_cast<LPCSTR>(&WriteBmp), &self);
-            GetModuleFileNameA(self, dllDir, MAX_PATH);
-            char* slash = strrchr(dllDir, '\\');
-            if (slash) slash[1] = '\0';
-            char path[MAX_PATH];
-            snprintf(path, MAX_PATH, "%.230sWarbandVR_smallrt_%d.bmp", dllDir, idx);
-            WriteBmp(path, d.Width, d.Height, lr.Pitch,
-                     static_cast<const unsigned char*>(lr.pBits));
-            LOG_INFO("DIAG: smallrt_%d %p %ux%u fmt=%d written", idx,
-                     static_cast<void*>(surf), d.Width, d.Height, d.Format);
-            sys->UnlockRect();
-        }
-    }
-    if (sys) sys->Release();
-}
-
-void StereoRenderer::DumpNotedZen0Texture(IDirect3DDevice9* device)
-{
-    DumpOneTexture(m_zen0Tex, "tooltip_fg_tex");
-    DumpOneTexture(m_zen1Tex, "tooltip_line_tex");
-
-    // TEMP DIAG: write every small offscreen RT seen while logging to a BMP
-    // (runs at present time - mid-scene readbacks reset the device).
-    int idx = 0;
-    for (auto* surf : m_smallRTs)
-    {
-        D3DSURFACE_DESC d{};
-        surf->GetDesc(&d);
-        IDirect3DSurface9* sys = nullptr;
-        HRESULT hr = device
-            ? device->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format,
-                                                  D3DPOOL_SYSTEMMEM, &sys, nullptr)
-            : E_FAIL;
-        if (SUCCEEDED(hr) && sys)
-            hr = device->GetRenderTargetData(surf, sys);
-        if (SUCCEEDED(hr) && sys)
-        {
-            D3DLOCKED_RECT lr{};
-            if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
-            {
-                char dllDir[MAX_PATH] = {};
-                HMODULE self = nullptr;
-                GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                   reinterpret_cast<LPCSTR>(&WriteBmp), &self);
-                GetModuleFileNameA(self, dllDir, MAX_PATH);
-                char* slash = strrchr(dllDir, '\\');
-                if (slash) slash[1] = '\0';
-                char path[MAX_PATH];
-                snprintf(path, MAX_PATH, "%.230sWarbandVR_smallrt_%d.bmp", dllDir, idx);
-                WriteBmp(path, d.Width, d.Height, lr.Pitch,
-                         static_cast<const unsigned char*>(lr.pBits));
-                LOG_INFO("DIAG: smallrt_%d %p %ux%u fmt=%d written", idx,
-                         static_cast<void*>(surf), d.Width, d.Height, d.Format);
-                sys->UnlockRect();
-            }
-        }
-        if (sys) sys->Release();
-        surf->Release();
-        ++idx;
-    }
-    m_smallRTs.clear();
 }
 
 void StereoRenderer::DumpBackbuffer(IDirect3DDevice9* device, int index)

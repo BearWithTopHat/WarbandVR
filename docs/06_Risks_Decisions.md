@@ -422,3 +422,32 @@ runs, the desktop window is intentionally not composited (perf).
   LMB and vice versa. Reviewed the draw-duplication gates
   (DivertedTextureBound / CurrentRTIsMain / SBSMonoUI) - coherent with the
   per-eye surface architecture, no leftover half-screen-fix scaffolding.
+
+### 2026-10-27 — Tooltip saga: two independent bugs, engine-informed root causes
+The world-map party tooltip (box visible, no text, then text offset) took a
+long forensic loop. Resolved via the WSE reverse-engineered engine structs:
+the tooltip is a CPU-tessellated mesh drawn by a dedicated
+`tooltip_render_context` with its own `tooltip_camera`, and the engine's
+render contexts carry `rcf_clear_depth_buffer`.
+
+**Bug 1 (empty box):** the tooltip context clears depth before drawing its
+text. The game's `Clear` passed through to the game's DS, but the tooltip
+text (a large mesh) takes the stereo path, which tests the per-eye depth
+buffer - which still held terrain depth, killing the text. Fix: `hkClear`
+mirrors main-frame clears to both eye depth buffers (`ClearBothEyes` binds
+`m_eyeDS[eye]`), and still passes through to the game's own target.
+`NoZTest=1` masked it by disabling the stereo path's depth test.
+
+**Bug 2 (text offset out of the box, opposite per eye):** the tooltip camera
+is axis-aligned with a perspective term (`m34=-1`, `m44=4.75`) - no ortho
+check accepted it, so it got the eye shift. Fix: `IsAxisAlignedUI` - rows 1-2
+are pure scale with zero off-diagonal; scene cameras always rotate (nonzero
+off-diagonal) and stay stereo. A mistargeted first attempt
+(`IsZeroRow34UI`, zero-row-3/4 family) was reverted after it made things
+worse.
+
+Also learned: texture-state readback via `GetTexture` is unreliable here (the
+engine's effect passes bind on stages s9/s11); the ground truth is logging
+the `SetTexture` *calls*. CPU readbacks of render targets (`GetRenderTargetData`,
+D3DX texture saves) mid-scene stall the driver into a device reset - debug
+dumps must go to the screen via GPU copies, never CPU readbacks.

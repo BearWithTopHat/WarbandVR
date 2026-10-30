@@ -42,7 +42,7 @@ side-by-side stereo to the normal monitor.
 - [x] SBS image in first-person on foot: two views, correct parallax (per-eye game-sized targets; verified with correct occlusion)
 - [x] SBS image in a field battle with 100+ agents
 - [x] Menu/UI text aligns with its buttons (per-draw register readback replaces captured matrices)
-- [ ] Encounter dialog option layout matches stock (open bug: options spread/reordered under stereo; not present with `EnableStereo=0`)
+- [x] Encounter dialog option layout matches stock (sub-viewport panels re-apply the game viewport after the per-eye RT swap; tooltip text fixed: depth clears now reach the per-eye depth buffers, and axis-aligned UI cameras are never eye-shifted)
 - [ ] IPD/WorldScale feel right (cross-eye check or record + review)
 - [x] No crash on window resize / alt-tab / `Reset`
 

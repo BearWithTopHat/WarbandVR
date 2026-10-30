@@ -141,10 +141,6 @@ namespace
                  static_cast<void*>(tex[2]), static_cast<void*>(tex[3]),
                  static_cast<void*>(ps), static_cast<void*>(vs),
                  zen, zf, zw, abe, sb, db, scis);
-        if (zen == 0 && primCount == 2)
-            StereoRenderer::Get().NoteZen0Texture(tex[0]);
-        if (zen == 1 && primCount == 1)
-            StereoRenderer::Get().NoteZen1Texture(tex[0]);
 
         for (auto* t : tex) if (t) t->Release();
         if (ps) ps->Release();
