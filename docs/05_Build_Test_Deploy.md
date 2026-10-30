@@ -6,7 +6,7 @@
   MSVC v143, Windows 10/11 SDK.
 - Platform: **Win32 (x86)** — mandatory; Warband is 32-bit.
 - Default build: zero external dependencies (static CRT).
-- M3 only: OpenXR SDK. Setup:
+- M3 only: OpenXR SDK. **Automated:** `tools\setup_openxr.ps1 -GameDir "<folder with mb_warband.exe>"` clones the pinned SDK source, builds the x86 loader with cmake, stages `external\openxr`, builds `Release-OpenXR|Win32`, and deploys the proxy + ini + x86 `openxr_loader.dll`. Manual equivalent:
   1. Get the SDK (Khronos release) with **Win32** loader binaries — the mod is
      a 32-bit DLL, so `openxr_loader.lib`/`openxr_loader.dll` must be x86.
      Prebuilt SDKs ship x64; for Win32 either build the loader from source
