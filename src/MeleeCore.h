@@ -105,6 +105,16 @@ namespace Melee
         *dx = cx; *dy = cy;
     }
 
+    // Distance between the two controllers in app space (metres). Used by
+    // the physical two-hand bow draw.
+    inline float HandDistance(const float* left, const float* right)
+    {
+        const float dx = left[0] - right[0];
+        const float dy = left[1] - right[1];
+        const float dz = left[2] - right[2];
+        return sqrtf(dx * dx + dy * dy + dz * dz);
+    }
+
     // Initial direction delta injected with the attack press (px). This is
     // Warband's direction-COMMIT distance, deliberately NOT covered by the
     // SteerDelta clamp: the clamp bounds continuous steering per poll, while

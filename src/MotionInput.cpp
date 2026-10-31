@@ -716,6 +716,24 @@ namespace
                 // Deliberately higher than emulation mode's 0.5: a light
                 // incidental press while gripping must not start a draw.
                 bool down = trig > 0.7f;
+
+                // Physical two-hand draw: with the trigger held, the pull
+                // distance decides the draw state with hysteresis (engage
+                // past 0.35 m, loose below 0.25 m). Trigger-only fallback
+                // when either pose is unavailable or BowTwoHand=0.
+                if (down && cfg.bowTwoHand)
+                {
+                    float lp[3], rp[3];
+                    const bool haveBoth = ReadHandPose(LEFT, lp) && ReadHandPose(RIGHT, rp);
+                    if (haveBoth)
+                    {
+                        const float dist = Melee::HandDistance(lp, rp);
+                        if (dist > 0.35f)      down = true;
+                        else if (dist < 0.25f) down = false;
+                        else                   down = g_triggerPrev; // hysteresis
+                    }
+                }
+
                 if (down && g_attackActive) return; // swing owns LMB; wait
                 if (down != g_triggerPrev)
                 {

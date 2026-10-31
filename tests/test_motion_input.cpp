@@ -462,6 +462,25 @@ int main()
     Frame(1601);
     CHECK(g_rec.Has("K116:1") && g_rec.Has("K116:0")); // F5 two-hand stance
 
+    // --- physical two-hand bow draw: pull apart to draw, together to loose --
+    Restart();
+    Config::Get().gestureGrab = true;
+    Config::Get().attackHoldTrigger = true;
+    g_haveHeadAbs = true; g_headAbs[0] = 0; g_headAbs[1] = 1.6f; g_headAbs[2] = 0;
+    XrFake::SetPose(XrFake::Left, -0.30f, 1.5f, -0.2f, true);
+    XrFake::SetPose(XrFake::Right, 0.30f, 1.5f, -0.2f, true); // 0.6 m apart
+    XrFake::SetFloat("trigger", XrFake::Right, 1.0f);
+    Frame(1000);
+    CHECK(g_rec.Has("BL:1")); // apart + trigger = draw
+    XrFake::SetPose(XrFake::Right, -0.30f, 1.5f, -0.2f, true); // same spot: 0 m
+    Frame(1010);
+    CHECK(g_rec.Has("BL:0")); // together = loose
+    // trigger-only mode ignores distance
+    Config::Get().bowTwoHand = false;
+    XrFake::SetFloat("trigger", XrFake::Right, 1.0f);
+    Frame(1020);
+    CHECK(g_rec.Has("BL:1"));
+
     // --- bow draw owns LMB; swing path cannot double-own it -----------------
     Restart();
     Config::Get().motionMelee = true;

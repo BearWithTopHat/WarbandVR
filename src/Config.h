@@ -71,6 +71,8 @@ struct Config
     bool  gestureGrab           = true;   // grab-zone gestures (docs/10)
     int   grabRefractoryMs      = 400;    // swing suppression after a zone grab
     bool  attackHoldTrigger     = true;   // trigger hold = bow draw / LMB hold
+    bool  bowTwoHand            = true;   // physical two-hand draw: pull hands
+                                          // apart to draw, together to loose
     float snapTurnDegrees       = 0.0f;   // >0: right-stick X snap turn (e.g. 45)
     float recenterHoldSeconds   = 3.0f;   // hold left stick click to recenter; 0 = off
     char  controllerPreset[16]  = "";     // empty, or generic/psvr2/quest:

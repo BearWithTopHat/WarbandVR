@@ -142,6 +142,7 @@ void Config::Load()
     gestureGrab          = GetBool(path, "Input", "GestureGrab", gestureGrab);
     grabRefractoryMs     = GetPrivateProfileIntA("Input", "GrabRefractoryMs", grabRefractoryMs, path);
     attackHoldTrigger    = GetBool(path, "Input", "AttackHoldTrigger", attackHoldTrigger);
+    bowTwoHand           = GetBool(path, "Input", "BowTwoHand", bowTwoHand);
     snapTurnDegrees      = GetFloat(path, "Input", "SnapTurnDegrees", snapTurnDegrees);
     recenterHoldSeconds  = GetFloat(path, "Input", "RecenterHoldSeconds", recenterHoldSeconds);
     {

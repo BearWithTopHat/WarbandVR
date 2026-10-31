@@ -355,6 +355,14 @@ static void TestSteerAndBeginDeltas()
 // Gesture zones (head at origin for simplicity)
 // ---------------------------------------------------------------------------
 
+static void TestHandDistance()
+{
+    const float l[3] = { -0.30f, 1.50f, -0.20f };
+    const float r[3] = { 0.30f, 1.50f, -0.20f };
+    CHECK(Near(Melee::HandDistance(l, r), 0.60f));
+    CHECK(Near(Melee::HandDistance(l, l), 0.0f)); // identical points
+}
+
 static void TestGestureZones()
 {
     const float head[3] = { 0.0f, 1.7f, 0.0f };
@@ -539,6 +547,7 @@ int main()
     TestFindPeak();
     TestSteerRelease();
     TestSteerAndBeginDeltas();
+    TestHandDistance();
     TestGestureZones();
     TestParse();
     TestOneEuro();
