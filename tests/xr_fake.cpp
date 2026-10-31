@@ -282,7 +282,7 @@ extern "C" XrResult xrDestroyActionSet(XrActionSet)
     return XR_SUCCESS;
 }
 
-extern "C" XrResult xrApplyHapticFeedback(XrSession, const XrHapticActionCreateInfo* ci,
+extern "C" XrResult xrApplyHapticFeedback(XrSession, const XrHapticActionInfo* ci,
                                           const XrHapticBaseHeader* ev)
 {
     if (!ci || !ev || ev->type != XR_TYPE_HAPTIC_VIBRATION) return -1;

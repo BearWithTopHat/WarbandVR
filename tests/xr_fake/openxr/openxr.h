@@ -75,7 +75,7 @@ typedef enum XrStructureType {
     XR_TYPE_FRAME_END_INFO = 41,
     XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING = 42,
     XR_TYPE_HAPTIC_VIBRATION = 43,
-    XR_TYPE_HAPTIC_ACTION_CREATE_INFO = 44
+    XR_TYPE_HAPTIC_ACTION_INFO = 44
 } XrStructureType;
 
 #define XR_FREQUENCY_UNSPECIFIED 0
@@ -85,12 +85,12 @@ typedef struct XrHapticVibration {
     XrStructureType type; const void* next;
     int64_t duration; float amplitude; float frequency;
 } XrHapticVibration;
-typedef struct XrHapticActionCreateInfo {
+typedef struct XrHapticActionInfo {
     XrStructureType type; const void* next;
     XrAction action; XrPath subactionPath;
-} XrHapticActionCreateInfo;
+} XrHapticActionInfo;
 
-extern "C" XrResult xrApplyHapticFeedback(XrSession session, const XrHapticActionCreateInfo* createInfo,
+extern "C" XrResult xrApplyHapticFeedback(XrSession session, const XrHapticActionInfo* hapticActionInfo,
                                           const XrHapticBaseHeader* hapticEvent);
 
 typedef enum XrFormFactor { XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY = 1 } XrFormFactor;

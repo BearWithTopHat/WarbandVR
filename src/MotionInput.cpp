@@ -253,7 +253,7 @@ namespace
         vib.amplitude = amplitude < 0.0f ? 0.0f : (amplitude > 1.0f ? 1.0f : amplitude);
         vib.duration = durationNs;
         vib.frequency = XR_FREQUENCY_UNSPECIFIED;
-        XrHapticActionCreateInfo haci{ XR_TYPE_HAPTIC_ACTION_CREATE_INFO };
+        XrHapticActionInfo haci{ XR_TYPE_HAPTIC_ACTION_INFO };
         haci.action = g_haptic;
         haci.subactionPath = g_handPath[h];
         xrApplyHapticFeedback(Session(), &haci,
