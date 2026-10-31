@@ -155,7 +155,7 @@ int main()
     CHECK(XrFake::HasAction("secondary"));
     CHECK(XrFake::HasAction("stickclick"));
     CHECK(XrFake::HasAction("squeezeclick"));
-    CHECK(XrFake::ActionsCreated() == "pose,trigger,squeeze,stick,primary,secondary,stickclick,squeezeclick");
+    CHECK(XrFake::ActionsCreated() == "pose,trigger,squeeze,stick,primary,secondary,stickclick,squeezeclick,haptic");
     CHECK(XrFake::AttachedSets() == 1);
     CHECK(XrFake::SuggestedBindings() > 0);
 
@@ -328,6 +328,37 @@ int main()
     XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
     Frame(1027);                       // dt = 7 ms: raw = 2*40*0.42 = 33 (not clamped)
     CHECK(g_rec.Has("M33,0"));
+
+    // --- forearm block: position hold + haptics ------------------------------
+    Restart();
+    Config::Get().motionMelee = true;
+    g_haveHeadAbs = true; g_headAbs[0] = 0; g_headAbs[1] = 1.6f; g_headAbs[2] = 0;
+    XrFake::SetPose(XrFake::Left, -0.15f, 1.60f, -0.25f, true); // forearm block
+    Frame(1000);
+    CHECK(!g_rec.Has("BR:1"));
+    Frame(1150);
+    CHECK(g_rec.Has("BR:1"));
+    CHECK(XrFake::HapticCount() >= 1);
+    CHECK(XrFake::LastHapticHand() == 0); // left forearm
+    XrFake::SetPose(XrFake::Left, 0.0f, 1.0f, 0.0f, true); // arm down
+    Frame(1160);
+    CHECK(g_rec.Has("BR:0"));
+
+    // --- swing haptics on attack start and bow release -----------------------
+    Restart();
+    Config::Get().motionMelee = true;
+    Config::Get().gestureGrab = true;
+    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
+    Frame(1000);
+    XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
+    Frame(1010);
+    CHECK(XrFake::HapticCount() >= 1);
+    CHECK(XrFake::LastHapticHand() == 1); // right swing
+    XrFake::SetFloat("trigger", XrFake::Right, 1.0f);
+    Frame(1201);
+    XrFake::SetFloat("trigger", XrFake::Right, 0.0f);
+    Frame(1210);
+    CHECK(XrFake::HapticCount() >= 2); // release pulse too
 
     // --- grip block hold-time ----------------------------------------------
     Restart();

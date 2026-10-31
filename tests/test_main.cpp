@@ -369,6 +369,17 @@ static void TestGestureZones()
     // left hand cannot grab the right hip zone
     CHECK(ClassifyZone(0, hp, head) == ZONE_NONE);
 
+    // --- forearm block zone -------------------------------------------------
+    hp[0] = -0.15f; hp[1] = 1.60f; hp[2] = -0.25f; // left forearm in front of face
+    CHECK(ClassifyZone(0, hp, head) == ZONE_BLOCK_FOREARM);
+    hp[0] = 0.20f; hp[1] = 1.30f; hp[2] = 0.00f;   // right hip is not a block
+    CHECK(ClassifyZone(1, hp, head) == ZONE_HIP_R);
+    CHECK(ClassifyZone(0, hp, head) == ZONE_NONE);
+    hp[0] = -0.15f; hp[1] = 1.90f; hp[2] = -0.25f; // too high
+    CHECK(ClassifyZone(0, hp, head) == ZONE_NONE);
+    hp[0] = -0.15f; hp[1] = 1.60f; hp[2] = 0.05f;  // in front of shoulder plane
+    CHECK(ClassifyZone(0, hp, head) == ZONE_NONE);
+
     // over-shoulder (either hand)
     hp[0] = 0.0f; hp[1] = 1.7f + 0.10f; hp[2] = 0.20f;
     CHECK(ClassifyZone(1, hp, head) == ZONE_SHOULDER);

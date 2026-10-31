@@ -73,8 +73,25 @@ typedef enum XrStructureType {
     XR_TYPE_COMPOSITION_LAYER_PROJECTION = 39,
     XR_TYPE_COMPOSITION_LAYER_QUAD = 40,
     XR_TYPE_FRAME_END_INFO = 41,
-    XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING = 42
+    XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING = 42,
+    XR_TYPE_HAPTIC_VIBRATION = 43,
+    XR_TYPE_HAPTIC_ACTION_CREATE_INFO = 44
 } XrStructureType;
+
+#define XR_FREQUENCY_UNSPECIFIED 0
+
+typedef struct XrHapticBaseHeader { XrStructureType type; const void* next; } XrHapticBaseHeader;
+typedef struct XrHapticVibration {
+    XrStructureType type; const void* next;
+    int64_t duration; float amplitude; float frequency;
+} XrHapticVibration;
+typedef struct XrHapticActionCreateInfo {
+    XrStructureType type; const void* next;
+    XrAction action; XrPath subactionPath;
+} XrHapticActionCreateInfo;
+
+extern "C" XrResult xrApplyHapticFeedback(XrSession session, const XrHapticActionCreateInfo* createInfo,
+                                          const XrHapticBaseHeader* hapticEvent);
 
 typedef enum XrFormFactor { XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY = 1 } XrFormFactor;
 typedef enum XrViewConfigurationType { XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO = 2 } XrViewConfigurationType;
@@ -91,7 +108,8 @@ typedef enum XrActionType {
     XR_ACTION_TYPE_BOOLEAN_INPUT = 1,
     XR_ACTION_TYPE_FLOAT_INPUT = 2,
     XR_ACTION_TYPE_VECTOR2F_INPUT = 3,
-    XR_ACTION_TYPE_POSE_INPUT = 100
+    XR_ACTION_TYPE_POSE_INPUT = 100,
+    XR_ACTION_TYPE_VIBRATION_OUTPUT = 101
 } XrActionType;
 
 typedef struct XrVector2f { float x; float y; } XrVector2f;

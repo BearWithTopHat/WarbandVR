@@ -100,6 +100,7 @@ namespace
     XrAction    g_secondary = XR_NULL_HANDLE; // bool (B / Y)
     XrAction    g_stickClick = XR_NULL_HANDLE; // bool (stick press; recenter chord)
     XrAction    g_squeezeClick = XR_NULL_HANDLE; // bool (grip click; runtime-timed holds)
+    XrAction    g_haptic = XR_NULL_HANDLE;       // vibration output (per hand)
     XrSpace     g_handSpace[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     XrPath      g_handPath[2]  = { XR_NULL_PATH, XR_NULL_PATH }; // left, right
     bool        g_ready = false;
@@ -227,6 +228,22 @@ namespace
         return (unsigned long long)(now - sinceNs) / 1000000ULL;
     }
 
+    // One haptic pulse on the given hand (amplitude 0..1, duration ns).
+    // Best-effort: haptics are optional and must never break input flow.
+    void PulseHaptics(Hand h, float amplitude, long long durationNs)
+    {
+        if (!Config::Get().haptics || !g_haptic || amplitude <= 0.0f) return;
+        XrHapticVibration vib{ XR_TYPE_HAPTIC_VIBRATION };
+        vib.amplitude = amplitude < 0.0f ? 0.0f : (amplitude > 1.0f ? 1.0f : amplitude);
+        vib.duration = durationNs;
+        vib.frequency = XR_FREQUENCY_UNSPECIFIED;
+        XrHapticActionCreateInfo haci{ XR_TYPE_HAPTIC_ACTION_CREATE_INFO };
+        haci.action = g_haptic;
+        haci.subactionPath = g_handPath[h];
+        xrApplyHapticFeedback(Session(), &haci,
+                              reinterpret_cast<const XrHapticBaseHeader*>(&vib));
+    }
+
     bool ReadVec2(XrAction a, Hand h, float* x, float* y)
     {
         XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO };
@@ -302,6 +319,7 @@ namespace
         LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
         SendMouseMove(dx, dy);
         SendMouseButton(true, true);
+        PulseHaptics(RIGHT, 0.7f, 40000000LL); // 40 ms on swing start
         LARGE_INTEGER t1; QueryPerformanceCounter(&t1);
         double us = (double)(t1.QuadPart - t0.QuadPart) * 1e6 / g_qpcFreq.QuadPart;
         LOG_INFO("[MELEE] swing -> %s (inject %.0f us)", name, us);
@@ -507,6 +525,24 @@ namespace
                 want = sq > 0.6f;
         }
 
+        // Physical forearm block (position-based hold): left forearm raised
+        // in front of the face, independent of grip state.
+        bool forearmBlock = false;
+        if (cfg.blockForearm)
+        {
+            float head[3] = {};
+            if (OpenXRBridge::GetHeadPoseAbsolute(head))
+            {
+                float hp[3];
+                if (ReadHandPose(LEFT, hp) &&
+                    ClassifyZone(LEFT, hp, head) == ZONE_BLOCK_FOREARM)
+                {
+                    want = true;
+                    forearmBlock = true;
+                }
+            }
+        }
+
         if (want && !g_blockHeld)
         {
             // Start the timer on the edge. heldMs must not be measured
@@ -528,6 +564,7 @@ namespace
             {
                 SendMouseButton(false, true);  // RMB down = hold block
                 g_mouseBtn[1] = true;
+                PulseHaptics(forearmBlock ? LEFT : RIGHT, 0.6f, 40000000LL); // 40 ms
             }
         }
         if (!want && g_blockHeld)
@@ -685,6 +722,7 @@ namespace
                     SendMouseButton(true, down);
                     g_mouseBtn[0] = down;
                     g_triggerPrev = down;
+                    if (!down) PulseHaptics(RIGHT, 0.5f, 30000000LL); // bow release
                     LOG_INFO("[GESTURE] bow draw %s", down ? "hold" : "release");
                 }
             }
@@ -695,24 +733,25 @@ namespace
     struct BindingMap { const char* profile; const char* posePath; const char* triggerPath;
                         const char* squeezePath; const char* stickPath;
                         const char* primaryPath; const char* secondaryPath;
-                        const char* stickClickPath; const char* squeezeClickPath; };
+                        const char* stickClickPath; const char* squeezeClickPath;
+                        const char* hapticPath; };
     const BindingMap kMaps[] = {
         { "/interaction_profiles/oculus_touch_controller",
           "/input/grip/pose", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick",
           "/input/a/click", "/input/b/click", "/input/thumbstick/click",
-          nullptr }, // no squeeze/click in this profile: analog fallback
+          nullptr, "/output/haptic" },
         { "/interaction_profiles/valve_index_controller",
           "/input/grip/pose", "/input/trigger/value", "/input/squeeze/value", "/input/thumbstick",
           "/input/a/click", "/input/b/click", "/input/thumbstick/click",
-          "/input/squeeze/click" },
+          "/input/squeeze/click", "/output/haptic" },
         { "/interaction_profiles/htc_vive_controller",
           "/input/grip/pose", "/input/trigger/value", "/input/squeeze/value", "/input/trackpad",
           "/input/trackpad/click", "/input/menu/click", nullptr, // no spare click
-          "/input/squeeze/click" },
+          "/input/squeeze/click", "/output/haptic" },
         { "/interaction_profiles/microsoft_motion_controller",
           "/input/grip/pose", "/input/trigger/value", "/input/squeeze/click", "/input/thumbstick",
           "/input/menu/click", "/input/trackpad/click", "/input/thumbstick/click",
-          "/input/squeeze/click" },
+          "/input/squeeze/click", "/output/haptic" },
         { "/interaction_profiles/khr/simple_controller",
           "/input/grip/pose", "/input/select/click", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
     };
@@ -760,6 +799,7 @@ bool MotionInput::Init()
     ok &= makeAction(&g_secondary, "secondary", "Secondary",  XR_ACTION_TYPE_BOOLEAN_INPUT);
     ok &= makeAction(&g_stickClick, "stickclick", "Stick Click", XR_ACTION_TYPE_BOOLEAN_INPUT);
     ok &= makeAction(&g_squeezeClick, "squeezeclick", "Squeeze Click", XR_ACTION_TYPE_BOOLEAN_INPUT);
+    ok &= makeAction(&g_haptic, "haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT);
     if (!ok)
     {
         LOG_ERROR("MotionInput: action creation failed");
@@ -789,6 +829,7 @@ bool MotionInput::Init()
             add(g_secondary, m.secondaryPath, h);
             add(g_stickClick, m.stickClickPath, h);
             add(g_squeezeClick, m.squeezeClickPath, h);
+            add(g_haptic, m.hapticPath, h);
         }
         if (binds.empty()) continue;
         XrInteractionProfileSuggestedBinding sb{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
@@ -882,6 +923,7 @@ void MotionInput::Shutdown()
     g_secondary = XR_NULL_HANDLE;
     g_stickClick = XR_NULL_HANDLE;
     g_squeezeClick = XR_NULL_HANDLE;
+    g_haptic = XR_NULL_HANDLE;
     memset(g_handSpace, 0, sizeof(g_handSpace));
     memset(g_handPath, 0, sizeof(g_handPath));
     g_ready = false;

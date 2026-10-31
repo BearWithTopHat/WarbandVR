@@ -581,7 +581,7 @@ index 9d5f95c..f5919f1 100644
 +Behavior changes require matching test updates. Do not weaken tests to make a
 +change pass.
 diff --git a/WarbandVR.ini b/WarbandVR.ini
-index 90469af..7533bb0 100644
+index 90469af..a4a3c47 100644
 --- a/WarbandVR.ini
 +++ b/WarbandVR.ini
 @@ -15,9 +15,10 @@ EnableStereo=0
@@ -690,7 +690,7 @@ index 90469af..7533bb0 100644
  [Tracking]
  ; M4 head tracking. Requires the OpenXR pose source (M3) to exist; until then
  ; these are plumbed but inert.
-@@ -57,10 +121,102 @@ RecenterKey=0x77
+@@ -57,10 +121,105 @@ RecenterKey=0x77
  ; Freeze tracking when the camera has been static for 250ms (menus/map).
  LockInMenus=1
  
@@ -714,13 +714,16 @@ index 90469af..7533bb0 100644
 +SwingThreshold=1.8
 +BlockHoldTime=0.15
 +AttackCooldownMs=400
++; Right-stick look sensitivity in pixels per frame AT 60 FPS (dt-scaled to
++; that reference so it feels the same at any frame rate).
 +MouseSpeed=6.0
 +StickDeadzone=0.2
 +; Held-attack steering: while a swing holds LMB, live hand motion keeps
 +; steering the swing (Warband's native held-attack behaviour). 0 = fixed
 +; canned direction per swing (classic click).
 +MotionSteer=1
-+; Mouse px injected per m/s of hand speed while steering.
++; Mouse px injected per m/s of hand speed while steering AT 60 FPS
++; (dt-scaled to that reference).
 +SteerScale=40.0
 +; Per-poll clamp on steering deltas (px). Prevents a single tracking spike
 +; from whipping the held attack across the screen; 0 disables steering deltas.
@@ -794,7 +797,7 @@ index 90469af..7533bb0 100644
  
  [Debug]
  ; 0 = errors only, 1 = +warnings, 2 = +info, 3 = verbose (slow, big logs)
-@@ -73,6 +229,7 @@ LogViewMatrices=25
+@@ -73,6 +232,7 @@ LogViewMatrices=25
  ;   0 = off
  ;   1 = per-frame summary of SetTransform VIEW/PROJECTION activity
  ;   2 = per-frame ranking of shader registers holding matrix-like data
@@ -802,7 +805,7 @@ index 90469af..7533bb0 100644
  CaptureMode=0
  
  ; M0 memory scanner (docs/04 part C). Set ExpectedPos to a position you are
-@@ -83,3 +240,8 @@ ExpectedPos=
+@@ -83,3 +243,8 @@ ExpectedPos=
  ; Optional manual range override (hex). Default = the exe's .data section.
  ScanBase=0x0
  ScanSize=0x0
@@ -1847,7 +1850,7 @@ index 48fe4aa..496d8ff 100644
  For live debugging, Visual Studio can attach to `mb_warband.exe`
  (Debug → Attach to Process) with the pdb in place — breakpoints in detours
 diff --git a/docs/06_Risks_Decisions.md b/docs/06_Risks_Decisions.md
-index 7911cc1..682786d 100644
+index 7911cc1..4849f44 100644
 --- a/docs/06_Risks_Decisions.md
 +++ b/docs/06_Risks_Decisions.md
 @@ -1,7 +1,10 @@
@@ -1862,7 +1865,7 @@ index 7911cc1..682786d 100644
  
  ## Risk register (living)
  
-@@ -11,10 +14,11 @@ Append-only. Decisions are dated; if a decision is reversed, add a new entry
+@@ -11,10 +14,13 @@ Append-only. Decisions are dated; if a decision is reversed, add a new entry
  | R2 | Engine re-points RT0 mid-frame (shadows/reflections) breaking per-eye duplication | Medium | Visual glitches | M2-1: shadow-surface chain per eye | Open |
  | R3 | CPU-bound battles + doubled draw calls miss 72 fps on host PC | Medium | Comfort | Battle-size guidance; overhead budget <4 ms enforced in M2 | Open |
  | R4 | Engine camera struct never found reliably (M0-C fails) | Low-Med | M4 degraded | Stay on matrix-delta tracking (VorpX-style) permanently | Open |
@@ -1873,10 +1876,12 @@ index 7911cc1..682786d 100644
 -| R8 | Scope creep into multiplayer/native-Frame | — | Project death | Explicit non-goals in design doc §9; AGENTS.md invariant 6 | Controlled |
 +| R8 | Scope creep into multiplayer | — | Project death | Explicit non-goals in design doc; AGENTS.md invariant 6. Native Steam Frame is now a Phase-2 package sharing this source tree (not scope creep), but its runtime is unverified | Controlled |
 +| R9 | Draw duplication misses frame budget in large battles (R3 realized) | Medium | Comfort | Depth-reprojection fallback (BannerlordVR lesson, docs/15): render one eye, rebuild the other from the Z-prepass depth at composite time. Design only; implement only if R3 measures bad on hardware | Open |
++| R10 | Frame-rate-dependent input feel at non-vanilla cadences | Medium | Comfort/gameplay | All rate-based injection (look, steering) is dt-scaled to 60 fps. WSE2's fix history confirms the bug class | Mitigated |
++| R11 | WSE2-x64 or threaded-renderer coexistence | Medium | Incompatible | Documented as incompatible/untested in FAQ; no x64 build planned (stock Warband is 32-bit) | Controlled |
  
  ## Decision log
  
-@@ -63,6 +67,133 @@ now so the M3 zero-copy shared-surface path is a local change in
+@@ -63,6 +69,133 @@ now so the M3 zero-copy shared-surface path is a local change in
  `IDirect3DDevice9Ex`'s vtable shares the base layout, so the 15 existing
  hooks apply unchanged.
  
@@ -2010,7 +2015,7 @@ index 7911cc1..682786d 100644
  ## Session log
  
  - **2026-10-01** — Scaffold created: proxy, IDirect3D9 wrapper, 15 device
-@@ -75,3 +206,217 @@ hooks apply unchanged.
+@@ -75,3 +208,217 @@ hooks apply unchanged.
    recenter key), exe version tagging. New doc 00_Runbook.md (human's evening
    plan). Prompts 03 rewritten. Next action: human runs Phase 1–3 of the
    runbook; first agent coding task is M1-1 bring-up.
@@ -2432,7 +2437,7 @@ index 0000000..5ac8c4d
 +What still needs a human: `docs/manual_test_checklist.md`.
 diff --git a/docs/08_Controls_and_Setup.md b/docs/08_Controls_and_Setup.md
 new file mode 100644
-index 0000000..24a8a4a
+index 0000000..f7fe555
 --- /dev/null
 +++ b/docs/08_Controls_and_Setup.md
 @@ -0,0 +1,169 @@
@@ -2511,7 +2516,7 @@ index 0000000..24a8a4a
 +| BlockHoldTime | 0.15 | Grip-hold seconds before block engages. |
 +| AttackCooldownMs | 400 | Min ms between injected attacks. |
 +| MotionSteer | 1 | Held swing follows live hand motion. |
-+| SteerScale | 40.0 | Mouse px per m/s of hand speed while steering. |
++| SteerScale | 40.0 | Mouse px per m/s of hand speed while steering at 60 fps (dt-scaled). |
 +| SteerMaxDeltaPx | 60 | Per-poll clamp on steering deltas; 0 disables steering. |
 +| SteerMaxHoldMs | 600 | Safety force-release of a held attack. |
 +| GrabRefractoryMs | 400 | Swing suppression after a zone grab/holster. |
@@ -2520,7 +2525,7 @@ index 0000000..24a8a4a
 +| ControllerPreset | (empty) | `generic`/`psvr2`/`quest`: loads `[Preset.<name>]` overrides for SwingThreshold/SteerScale/BlockHoldTime. Empty = use [Input] values. |
 +| GestureGrab | 1 | Grab-zone gestures emit the F1–F6 gesture keys (companion module turns them into equipment switches). |
 +| AttackHoldTrigger | 1 | Right trigger hold = LMB hold (physical bow draw); owns LMB while held. |
-+| MouseSpeed | 6.0 | Right-stick look sensitivity. |
++| MouseSpeed | 6.0 | Right-stick look sensitivity in px/frame at 60 fps (dt-scaled). |
 +| StickDeadzone | 0.2 | Stick deadzone. |
 +| [InputMap] Forward/Back/Left/Right/Use/Jump | W/S/A/D/F/SPACE | Emulated keys (names or single chars). |
 +| [InputMap] GrabHipLeft/GrabHipRight/GrabShoulder/GrabQuiver/TwoHand/Holster | F1/F2/F3/F4/F5/F6 | Gesture-channel keys the companion module listens for. |
@@ -3103,10 +3108,10 @@ index 0000000..119473f
 +native source fork.
 diff --git a/docs/14_FAQ_Troubleshooting.md b/docs/14_FAQ_Troubleshooting.md
 new file mode 100644
-index 0000000..f3ab1a1
+index 0000000..6e27341
 --- /dev/null
 +++ b/docs/14_FAQ_Troubleshooting.md
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,209 @@
 +# 14 — FAQ and troubleshooting
 +
 +This page collects the likely failure modes from the risk register and the
@@ -3192,7 +3197,19 @@ index 0000000..f3ab1a1
 +game really loaded this proxy, that no other `d3d9.dll` wrapper is chained
 +first, and that the log reaches `Device created OK`.
 +
-+### Headset shows no image
++### WSE2 compatibility
++
++- **WSE2-x64 is incompatible**: a 64-bit Warband process cannot load the
++  32-bit d3d9.dll proxy (WarbandVR is Win32-only by design, because stock
++  Warband is 32-bit).
++- **WSE2-x86 coexistence is untested and risky**: WSE2 also patches rendering
++  and has a threaded renderer, while the proxy assumes single-threaded D3D9
++  calls. Do not run both without validating on your setup; if you must, test
++  with WSE2's threaded renderer disabled.
++- Mouse sensitivity and held-attack steering are **dt-scaled to a 60 fps
++  reference** (frame-rate independent, matching the WSE2-fixed bug class).
++
++### Water/ocean shows a repeating animal (or other offscreen) texture
 +
 +Check in order:
 +
@@ -3447,10 +3464,10 @@ index 0000000..ba3d8d5
 +VDXR", not code changes.
 diff --git a/docs/manual_test_checklist.md b/docs/manual_test_checklist.md
 new file mode 100644
-index 0000000..14b5f66
+index 0000000..d366ff0
 --- /dev/null
 +++ b/docs/manual_test_checklist.md
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,108 @@
 +# Manual in-game test checklist
 +
 +Everything on this page requires a human with the game (+ HMD for the VR
@@ -3539,6 +3556,10 @@ index 0000000..14b5f66
 +- [ ] Crossbow ritual in either order: quiver-grab then both-grips AND
 +      both-grips then quiver-grab must each seat one bolt; switching weapons
 +      mid-ritual resets it within ~1 s.
++- [ ] Repeat with light AND heavy crossbows, after a weapon switch, and with
++      one bolt left (WSE2's reload parity fixes suggest native edge cases).
++- [ ] Right-stick look and held-attack steering feel the same at 60/90/144 fps
++      (dt-scaled rates, not per-frame).
 +- [ ] Runtime matrix: validate on SteamVR OpenXR first. Meta's own runtime
 +      is a known-bad path in adjacent projects (docs/15); answer Meta-runtime
 +      issues with "use SteamVR or VDXR", not code changes.
@@ -7050,10 +7071,10 @@ index 0000000..a58c148
 +}
 diff --git a/src/MotionInput.cpp b/src/MotionInput.cpp
 new file mode 100644
-index 0000000..f37e734
+index 0000000..a5f2363
 --- /dev/null
 +++ b/src/MotionInput.cpp
-@@ -0,0 +1,965 @@
+@@ -0,0 +1,985 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// WarbandVR - GPL v3 - see LICENSE
 +//
@@ -7198,6 +7219,9 @@ index 0000000..f37e734
 +    unsigned long long g_l3Since = 0;
 +    bool   g_l3Cancelled = false;
 +    bool   g_l3Fired = false;
++    // Frame-time state for dt-scaled injection (file scope so Shutdown can
++    // reset it; function-static would be unreachable there).
++    unsigned long long s_lastFrameMs = 0;
 +
 +    using Melee::AttackDir;
 +    using Melee::DIR_LEFT; using Melee::DIR_RIGHT;
@@ -7379,7 +7403,7 @@ index 0000000..f37e734
 +    // While an attack is held, steer the swing with live hand motion
 +    // (Warband steers a held attack from mouse movement). With MotionSteer=0
 +    // this degrades to a plain click (release next frame).
-+    void SteerAttack(const Config& cfg, unsigned long long now)
++    void SteerAttack(const Config& cfg, unsigned long long now, float dt60)
 +    {
 +        if (!g_attackActive) return;
 +
@@ -7404,14 +7428,16 @@ index 0000000..f37e734
 +        Melee::VelocityToView(v, headYaw, &vRight, &vUp);
 +
 +        int dx = 0, dy = 0;
-+        Melee::SteerDelta(vRight, vUp, cfg.steerScale, cfg.steerMaxDeltaPx, &dx, &dy);
++        // dt60 scales steering rate to a 60 fps reference so held-attack
++        // steering feels identical at any frame rate (WSE2-fixed class).
++        Melee::SteerDelta(vRight, vUp, cfg.steerScale * dt60, cfg.steerMaxDeltaPx, &dx, &dy);
 +        SendMouseMove(dx, dy);
 +    }
 +
 +    // -------------------------------------------------------------------------
 +    // Layer 1: controller -> kb/mouse emulation
 +    // -------------------------------------------------------------------------
-+    void Emulate(const Config& cfg)
++    void Emulate(const Config& cfg, float dt60)
 +    {
 +        // Left stick -> WASD
 +        float lx = 0, ly = 0;
@@ -7426,7 +7452,10 @@ index 0000000..f37e734
 +
 +        // Right stick -> snap turn (h2-mod-vr style comfort option) or
 +        // smooth mouse look, per config. Snap is edge-triggered with a
-+        // return-to-centre re-arm.
++        // return-to-centre re-arm. Look deltas are scaled by frame time
++        // (dt60 = dt * 60): Warband's input is frame-rate dependent (WSE2
++        // fixed the same class), and the VR cadence differs from vanilla.
++        const float lookScale = cfg.mouseSpeed * dt60;
 +        float rx = 0, ry = 0;
 +        if (ReadVec2(g_stick, RIGHT, &rx, &ry))
 +        {
@@ -7442,11 +7471,11 @@ index 0000000..f37e734
 +                }
 +                // stick Y still does smooth pitch
 +                if (fabsf(ry) > dz)
-+                    SendMouseMove(0, (int)(ry * cfg.mouseSpeed));
++                    SendMouseMove(0, (int)(ry * lookScale));
 +            }
 +            else if (fabsf(rx) > dz || fabsf(ry) > dz)
 +            {
-+                SendMouseMove((int)(rx * cfg.mouseSpeed), (int)(ry * cfg.mouseSpeed));
++                SendMouseMove((int)(rx * lookScale), (int)(ry * lookScale));
 +            }
 +        }
 +
@@ -7484,9 +7513,9 @@ index 0000000..f37e734
 +    // -------------------------------------------------------------------------
 +    // Layer 2: swing classification + held-attack steering
 +    // -------------------------------------------------------------------------
-+    void MeleeTick(const Config& cfg, unsigned long long now)
++    void MeleeTick(const Config& cfg, unsigned long long now, float dt60)
 +    {
-+        SteerAttack(cfg, now);
++        SteerAttack(cfg, now, dt60);
 +
 +        float v[3] = {};
 +        if (ReadHandVelocity(RIGHT, v))
@@ -7916,6 +7945,7 @@ index 0000000..f37e734
 +    g_l3Since = 0;
 +    g_l3Cancelled = false;
 +    g_l3Fired = false;
++    s_lastFrameMs = 0; // dt state must not leak across session restarts
 +
 +    for (int h = 0; h < 2; ++h)
 +        if (g_handSpace[h]) xrDestroySpace(g_handSpace[h]);
@@ -7960,8 +7990,19 @@ index 0000000..f37e734
 +
 +    const Config& cfg = Config::Get();
 +    unsigned long long nowMs = GetTickCount64();
-+    if (cfg.emulateControllers) Emulate(cfg);
-+    if (cfg.motionMelee)        MeleeTick(cfg, nowMs);
++    // Frame-time factor for all rate-based injection (dt * 60, clamped).
++    float dt = 1.0f / 60.0f;
++    if (s_lastFrameMs != 0)
++    {
++        const unsigned long long deltaMs = nowMs - s_lastFrameMs;
++        dt = deltaMs / 1000.0f;
++        if (dt > 0.1f) dt = 0.1f;          // hitch guard: cap a long frame
++        if (dt < 1.0f / 240.0f) dt = 1.0f / 240.0f;
++    }
++    s_lastFrameMs = nowMs;
++    const float dt60 = dt * 60.0f;
++    if (cfg.emulateControllers) Emulate(cfg, dt60);
++    if (cfg.motionMelee)        MeleeTick(cfg, nowMs, dt60);
 +    if (cfg.gestureGrab)        Gestures(cfg, nowMs);
 +
 +    // Recenter chord (BannerlordVR lesson): no keyboard in a headset, so
@@ -9351,7 +9392,7 @@ index 0000000..9650c79
 +    }
 +}
 diff --git a/src/StereoRenderer.cpp b/src/StereoRenderer.cpp
-index d708385..68040f9 100644
+index d708385..bda0c6d 100644
 --- a/src/StereoRenderer.cpp
 +++ b/src/StereoRenderer.cpp
 @@ -1,11 +1,16 @@
@@ -9407,7 +9448,7 @@ index d708385..68040f9 100644
      m_active = false;
  }
  
-@@ -61,56 +76,348 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
+@@ -61,56 +76,350 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
          return;
      }
  
@@ -9434,7 +9475,9 @@ index d708385..68040f9 100644
 +    // open them from D3D11 for a GPU-to-GPU copy.
 +    bool wantShared = false;
 +    if (Config::Get().sharedSurface)
-+    {
+     {
+-        LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) failed hr=0x%08X", w * 2, h, hr);
+-        m_stereoSurf = nullptr;
 +        IDirect3DDevice9Ex* ex = nullptr;
 +        if (SUCCEEDED(device->QueryInterface(IID_IDirect3DDevice9Ex, reinterpret_cast<void**>(&ex))) && ex)
 +        {
@@ -9490,9 +9533,7 @@ index d708385..68040f9 100644
 +        }
 +    }
 +    if (!ok)
-     {
--        LOG_ERROR("StereoRenderer: CreateRenderTarget(%ux%u) failed hr=0x%08X", w * 2, h, hr);
--        m_stereoSurf = nullptr;
++    {
 +        ReleaseResources();
          return;
      }
@@ -9529,6 +9570,8 @@ index d708385..68040f9 100644
 +    if (m_vignetteTex) { m_vignetteTex->Release(); m_vignetteTex = nullptr; }
 +    m_vignetteFailed = false;
 +    ReleaseEyeTargets();
++    m_hasLastAppliedVp = false;
++    m_hasLastAppliedScissor = false;
 +    m_eyeW = m_eyeH = 0;
 +    m_curRT = nullptr;
 +    m_curRTIsMain = false;
@@ -9783,7 +9826,7 @@ index d708385..68040f9 100644
  
      // Perf rollup: every 600 frames report average duplication cost.
      ++m_frameCount;
-@@ -126,26 +433,29 @@ void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
+@@ -126,26 +435,29 @@ void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
  
  void StereoRenderer::OnPresent(IDirect3DDevice9* device)
  {
@@ -9823,7 +9866,7 @@ index d708385..68040f9 100644
  }
  
  void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
-@@ -154,28 +464,130 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
+@@ -154,28 +466,142 @@ void StereoRenderer::CompositeToBackbuffer(IDirect3DDevice9* device)
      if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb)
          return;
  
@@ -9845,11 +9888,7 @@ index d708385..68040f9 100644
 +        D3DSURFACE_DESC srcDesc{};
 +        m_eyeSurf[eye]->GetDesc(&srcDesc);
 +        RECT src = { 0, 0, static_cast<LONG>(srcDesc.Width), static_cast<LONG>(srcDesc.Height) };
- 
--    RECT srcL = { 0,     0, halfW,        h };
--    RECT srcR = { halfW, 0, halfW * 2,    h };
--    RECT dstL = { 0,       0, bbHalfW,     bbH };
--    RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
++
 +        // The game lays out menus and text for the FULL window width. Simply
 +        // stretching each full-width eye into its split panel distorts that
 +        // UI per panel (the "menu glitch" report). Fit the eye into the
@@ -9870,13 +9909,17 @@ index d708385..68040f9 100644
 +        else
 +            dst = { eye * halfW, 0, (eye + 1) * halfW, bbH };
  
--    // D3DTEXF_NONE keeps this legal for equal-format surfaces.
--    device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
--    device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
+-    RECT srcL = { 0,     0, halfW,        h };
+-    RECT srcR = { halfW, 0, halfW * 2,    h };
+-    RECT dstL = { 0,       0, bbHalfW,     bbH };
+-    RECT dstR = { bbHalfW, 0, bbHalfW * 2, bbH };
 +        // D3DTEXF_NONE keeps this legal for equal-format surfaces.
 +        device->StretchRect(m_eyeSurf[eye], &src, bb, &dst, D3DTEXF_NONE);
 +    }
-+
+ 
+-    // D3DTEXF_NONE keeps this legal for equal-format surfaces.
+-    device->StretchRect(m_stereoSurf, &srcL, bb, &dstL, D3DTEXF_NONE);
+-    device->StretchRect(m_stereoSurf, &srcR, bb, &dstR, D3DTEXF_NONE);
 +    static bool s_loggedComposite = false;
 +    if (!s_loggedComposite)
 +    {
@@ -9893,7 +9936,19 @@ index d708385..68040f9 100644
 +
 +void StereoRenderer::SetCurrentRT(IDirect3DSurface9* surf)
 +{
-+    if (surf == m_curRT) return;
++    if (surf == m_curRT)
++    {
++        // Early-out must still refresh the main-size flag: after a Reset the
++        // eye targets are recreated, and without this the flag would stay
++        // stale (mono) until some *different* RT came along.
++        if (surf && m_eyeW != 0)
++        {
++            D3DSURFACE_DESC d{};
++            if (SUCCEEDED(surf->GetDesc(&d)))
++                m_curRTIsMain = (d.Width == m_eyeW && d.Height == m_eyeH);
++        }
++        return;
++    }
 +    m_curRT = surf;
 +    m_curRTIsMain = false;
 +    if (!surf || m_eyeW == 0) return;
@@ -9968,7 +10023,7 @@ index d708385..68040f9 100644
  void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  {
      // Menu-lock bookkeeping: note when the view last actually changed.
-@@ -184,9 +596,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
+@@ -184,9 +610,10 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
  
      m_baseView = m;
      m_hasView  = true;
@@ -9980,7 +10035,7 @@ index d708385..68040f9 100644
      {
          char buf[640];
          Mat::Format(m, buf, sizeof(buf));
-@@ -207,7 +620,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
+@@ -207,7 +634,18 @@ void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)
      m_hasGameVp = true;
  }
  
@@ -10000,7 +10055,7 @@ index d708385..68040f9 100644
  
  void StereoRenderer::CheckRecenterKey()
  {
-@@ -216,7 +640,10 @@ void StereoRenderer::CheckRecenterKey()
+@@ -216,7 +654,10 @@ void StereoRenderer::CheckRecenterKey()
  
      bool down = (GetAsyncKeyState(cfg.recenterKey) & 0x8000) != 0;
      if (down && !m_recenterKeyDown)
@@ -10012,7 +10067,7 @@ index d708385..68040f9 100644
      m_recenterKeyDown = down;
  }
  
-@@ -246,32 +673,84 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
+@@ -246,32 +687,95 @@ D3DMATRIX StereoRenderer::ApplyHeadDelta(const D3DMATRIX& view)
      return Mat::Multiply(Mat::Multiply(rt, tInv), view);
  }
  
@@ -10042,12 +10097,11 @@ index d708385..68040f9 100644
 +    }
 +
 +    // Viewport: the game's intended viewport, used as-is - each eye target
-+    // is game-sized, so no per-eye offset is needed anywhere.
++    // is game-sized, so no per-eye offset is needed anywhere. Only re-apply
++    // when it changed; RestoreGameState leaves the device on the same value.
      D3DVIEWPORT9 vp;
      if (m_hasGameVp) vp = m_gameVp;
 -    else if (FAILED(device->GetViewport(&vp))) return;
--
--    vp.X = (eye == 0) ? 0 : vp.Width; // stereo target is 2x width
 +    else
 +    {
 +        vp.X = 0; vp.Y = 0;
@@ -10055,21 +10109,32 @@ index d708385..68040f9 100644
 +        vp.Height = m_eyeH;
 +        vp.MinZ = 0.0f; vp.MaxZ = 1.0f;
 +    }
-     device->SetViewport(&vp);
++    if (!m_hasLastAppliedVp || memcmp(&m_lastAppliedVp, &vp, sizeof(vp)) != 0)
++    {
++        device->SetViewport(&vp);
++        m_lastAppliedVp = vp;
++        m_hasLastAppliedVp = true;
++    }
  
--    if (!m_hasView) return; // nothing captured yet; draws will match mono
+-    vp.X = (eye == 0) ? 0 : vp.Width; // stereo target is 2x width
+-    device->SetViewport(&vp);
 +    if (cfg.noZTest)
 +        device->SetRenderState(D3DRS_ZENABLE, FALSE); // diagnostic: bypass depth
- 
--    const float halfSep = (cfg.ipd * cfg.worldScale) * 0.5f;
++
 +    // Scissor: game coords, valid as-is on a game-sized eye target.
 +    if (m_scissorEnabled)
 +    {
 +        RECT r = m_hasScissor ? m_gameScissor
 +                              : RECT{ 0, 0, static_cast<LONG>(m_eyeW), static_cast<LONG>(m_eyeH) };
-+        device->SetScissorRect(&r);
++        if (!m_hasLastAppliedScissor || memcmp(&m_lastAppliedScissor, &r, sizeof(r)) != 0)
++        {
++            device->SetScissorRect(&r);
++            m_lastAppliedScissor = r;
++            m_hasLastAppliedScissor = true;
++        }
 +    }
-+
+ 
+-    if (!m_hasView) return; // nothing captured yet; draws will match mono
 +    // Samplers bound to the ACTIVE shadow pass's surface get this eye's copy
 +    // (M2). ONLY during that pass: applying these binds to later main-scene
 +    // draws would leak offscreen content into unrelated geometry (an
@@ -10079,11 +10144,12 @@ index d708385..68040f9 100644
 +            if (bind.second == m_shadowActive)
 +                device->SetTexture(bind.first, bind.second->eyeTex[eye]);
  
+-    const float halfSep = (cfg.ipd * cfg.worldScale) * 0.5f;
++    if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
+ 
 -    // M4: head pose delta composes onto the captured view first.
 -    D3DMATRIX headView = ApplyHeadDelta(m_baseView);
 -    D3DMATRIX eyeView  = Mat::EyeView(headView, halfSep, eye);
-+    if (!m_hasView && cfg.viewSource == 0) return; // nothing captured yet; draws will match mono
-+
 +    const float halfSep = (cfg.ipd * cfg.worldScale) * 0.5f;
  
      if (cfg.viewSource == 0)
@@ -10108,7 +10174,7 @@ index d708385..68040f9 100644
          // Fixed-function path: overwrite the VIEW transform for this eye.
          device->SetTransform(D3DTS_VIEW, &eyeView);
  
-@@ -284,19 +763,74 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
+@@ -284,19 +788,74 @@ void StereoRenderer::ApplyEye(IDirect3DDevice9* device, int eye)
      }
      else
      {
@@ -10189,7 +10255,7 @@ index d708385..68040f9 100644
      if (m_hasView && Config::Get().viewSource == 0)
          device->SetTransform(D3DTS_VIEW, &m_baseView);
      if (m_hasProj && Config::Get().asymmetricProjection && Config::Get().viewSource == 0)
-@@ -308,3 +842,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
+@@ -308,3 +867,256 @@ void StereoRenderer::AddDuplicationTime(double microseconds, int drawCalls)
      m_dupTimeUs += microseconds;
      m_dupCalls  += drawCalls;
  }
@@ -10447,7 +10513,7 @@ index d708385..68040f9 100644
 +    }
 +}
 diff --git a/src/StereoRenderer.h b/src/StereoRenderer.h
-index 5363cfc..bb7ce49 100644
+index 5363cfc..2ad5ef7 100644
 --- a/src/StereoRenderer.h
 +++ b/src/StereoRenderer.h
 @@ -1,24 +1,38 @@
@@ -10630,7 +10696,7 @@ index 5363cfc..bb7ce49 100644
  
      D3DMATRIX  m_baseView  = {};
      bool       m_hasView   = false;
-@@ -77,10 +162,28 @@ private:
+@@ -77,15 +162,42 @@ private:
      bool       m_hasProj   = false;
      D3DVIEWPORT9 m_gameVp  = {};
      bool       m_hasGameVp = false;
@@ -10661,6 +10727,20 @@ index 5363cfc..bb7ce49 100644
  
      // Menu-lock detection (M4): last time the captured view actually changed.
      unsigned long long m_lastViewChangeTick = 0;
+     bool               m_recenterKeyDown    = false;
+ 
++    // Per-eye dirty tracking: RestoreGameState puts the game's own viewport
++    // and scissor back after every pair, so re-applying identical values on
++    // the next pair is pure overhead. Skip them when unchanged (the device
++    // is already in that state).
++    D3DVIEWPORT9 m_lastAppliedVp      = {};
++    bool         m_hasLastAppliedVp   = false;
++    RECT         m_lastAppliedScissor = {};
++    bool         m_hasLastAppliedScissor = false;
++
+     // Perf accumulators (reported every 600 frames at LogLevel>=2)
+     double             m_dupTimeUs   = 0.0;
+     int                m_dupCalls    = 0;
 diff --git a/src/VTableHook.h b/src/VTableHook.h
 deleted file mode 100644
 index 9468925..0000000
@@ -12085,10 +12165,10 @@ index 0000000..9b5847d
 +}
 diff --git a/tests/test_integration.cpp b/tests/test_integration.cpp
 new file mode 100644
-index 0000000..83244c2
+index 0000000..cede398
 --- /dev/null
 +++ b/tests/test_integration.cpp
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,436 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// Headless integration tests: real DeviceHooks + StereoRenderer + Config +
 +// Logger compiled against the winshim, driven through a recording FakeDevice.
@@ -12287,6 +12367,15 @@ index 0000000..83244c2
 +    CHECK(Fake::CountContaining("SetTransform", "_41=0.0320") > 0 ||
 +          Fake::CountContaining("SetTransform", "_41=-0.0320") > 0);
 +
++    // --- dirty tracking: only the first eye of the first pair applies ------
++    StereoRenderer::Get().OnReset(&dev, nullptr); // clear dirty flags
++    hkSetRenderTarget(&dev, 0, bb);
++    hkBeginScene(&dev);
++    Fake::Clear();
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
++    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
++    CHECK(Fake::Count("SetViewport") == 1);
++
 +    // --- game's own offscreen RT passes through untouched -----------------
 +    Fake::Clear();
 +    FakeSurface shadowMap(256, 256);
@@ -12381,7 +12470,7 @@ index 0000000..83244c2
 +    hkSetScissorRect(&dev, &sr);
 +    Fake::Clear();
 +    hkDrawPrimitive(&dev, D3DPT_TRIANGLELIST, 0, 100);
-+    CHECK(Fake::Count("SetScissorRect") == 3); // eye0, eye1, restore game rect
++    CHECK(Fake::Count("SetScissorRect") == 2); // one apply + one restore
 +    CHECK(dev.hasScissor);
 +    CHECK(dev.scissor.left == 10 && dev.scissor.right == 300);
 +
@@ -13063,10 +13152,10 @@ index 0000000..0d53a42
 +}
 diff --git a/tests/test_motion_input.cpp b/tests/test_motion_input.cpp
 new file mode 100644
-index 0000000..bbc08c7
+index 0000000..e505c3c
 --- /dev/null
 +++ b/tests/test_motion_input.cpp
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,479 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +// Headless OpenXR action-space tests: real MotionInput compiled with
 +// WBVR_WITH_OPENXR, driven by a scriptable XR fake and recording input sink.
@@ -13244,7 +13333,7 @@ index 0000000..bbc08c7
 +    // --- right stick smooth look and face buttons ---------------------------
 +    XrFake::SetVec2("stick", XrFake::Right, 0.5f, 0.0f);
 +    Frame(1040);
-+    CHECK(g_rec.Has("M3,0"));
++    CHECK(g_rec.Has("M1,0")); // 0.5 * 6 * 0.6 = 1.8 -> 1
 +    XrFake::SetVec2("stick", XrFake::Right, 0.0f, 0.0f);
 +    XrFake::SetBool("primary", XrFake::Right, true);
 +    Frame(1050);
@@ -13349,7 +13438,7 @@ index 0000000..bbc08c7
 +    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
 +    Frame(1020);
 +    CHECK(g_rec.Count("M80,0") == 1); // initial direction delta
-+    CHECK(g_rec.Count("M60,0") == 1); // steer delta, clamped to SteerMaxDeltaPx
++    CHECK(g_rec.Count("M47,0") == 1); // dt=10ms: 2*40*0.6 = 48.0f -> 47 (truncation)
 +    XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
 +    Frame(1141);                     // hand stopped, minimum hold elapsed
 +    CHECK(g_rec.Has("BL:0"));
@@ -13369,6 +13458,34 @@ index 0000000..bbc08c7
 +    CHECK(g_rec.Has("M0,80"));
 +    Frame(2131);
 +    CHECK(g_rec.Count("BL:0") >= 3);
++
++    // --- dt-scaled look: same px/sec at any frame rate ----------------------
++    Restart();
++    XrFake::SetVec2("stick", XrFake::Right, 1.0f, 0.0f);
++    Frame(1000);                       // first frame: dt defaults to 1/60
++    Frame(1016);                       // 16 ms: dt60 ~= 1.0 -> 6 px
++    CHECK(g_rec.Has("M6,0"));
++    g_rec.Clear();
++    Frame(1023);                       // 7 ms: dt60 = 0.42 -> 2 px (int)
++    CHECK(g_rec.Has("M2,0"));
++    g_rec.Clear();
++    Frame(1056);                       // 33 ms: dt60 = 1.98 -> 11 px (int)
++    CHECK(g_rec.Has("M11,0"));
++
++    // --- dt-scaled held-attack steering ------------------------------------
++    Restart();
++    Config::Get().motionMelee = true;
++    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
++    Frame(1000);
++    XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
++    Frame(1010);
++    CHECK(g_rec.Has("BL:1"));
++    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
++    Frame(1020);                       // dt = 10 ms: raw = 2*40*0.6 = 48
++    CHECK(g_rec.Has("M47,0")); // dt=10ms: 2*40*0.6 = 48.0f -> 47 (truncation)
++    XrFake::SetVelocity(XrFake::Right, 2.0f, 0.0f, 0.0f, true);
++    Frame(1027);                       // dt = 7 ms: raw = 2*40*0.42 = 33 (not clamped)
++    CHECK(g_rec.Has("M33,0"));
 +
 +    // --- grip block hold-time ----------------------------------------------
 +    Restart();

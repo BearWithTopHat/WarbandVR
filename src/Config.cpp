@@ -130,6 +130,8 @@ void Config::Load()
     motionMelee          = GetBool(path, "Input", "MotionMelee", motionMelee);
     swingThreshold       = GetFloat(path, "Input", "SwingThreshold", swingThreshold);
     blockHoldTime        = GetFloat(path, "Input", "BlockHoldTime", blockHoldTime);
+    blockForearm         = GetBool(path, "Input", "BlockForearm", blockForearm);
+    haptics              = GetBool(path, "Input", "Haptics", haptics);
     attackCooldownMs     = GetPrivateProfileIntA("Input", "AttackCooldownMs", attackCooldownMs, path);
     mouseSpeed           = GetFloat(path, "Input", "MouseSpeed", mouseSpeed);
     stickDeadzone        = GetFloat(path, "Input", "StickDeadzone", stickDeadzone);

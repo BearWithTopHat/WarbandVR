@@ -12,7 +12,8 @@
 
 #include <cmath>
 
-enum GrabZone { ZONE_NONE, ZONE_HIP_L, ZONE_HIP_R, ZONE_SHOULDER, ZONE_QUIVER };
+enum GrabZone { ZONE_NONE, ZONE_HIP_L, ZONE_HIP_R, ZONE_SHOULDER, ZONE_QUIVER,
+                ZONE_BLOCK_FOREARM };
 
 // hand: 0 = left, 1 = right. hp = hand position, head = head position (xyz).
 inline GrabZone ClassifyZone(int hand, const float* hp, const float* head)
@@ -21,6 +22,14 @@ inline GrabZone ClassifyZone(int hand, const float* hp, const float* head)
     float dx = hp[0] - head[0];
     float dy = hp[1] - head[1];
     float dz = hp[2] - head[2];
+
+    // Forearm block: left forearm raised in front of the face. Above the hip
+    // band (so it cannot collide with hip grabs), in front of the head plane
+    // (negative dz), roughly centered under the chin.
+    if (hand == LEFT && dy > -0.18f && dy < 0.05f &&
+        dz > -0.45f && dz < -0.08f && dx > -0.35f && dx < 0.05f)
+        return ZONE_BLOCK_FOREARM;
+
     // hip: below chest, slightly out to the hand's side, in front-ish
     if (dy > -0.50f && dy < -0.18f && fabsf(dz) < 0.30f)
     {

@@ -59,6 +59,8 @@ struct Config
     bool  motionMelee           = false;  // swing-to-attack injection
     float swingThreshold        = 1.8f;   // m/s to start a swing
     float blockHoldTime         = 0.15f;  // s of grip hold before block engages
+    bool  blockForearm          = true;   // left forearm raised = physical block
+    bool  haptics               = true;   // haptic pulses on swing/block/bow release
     int   attackCooldownMs      = 400;    // min ms between injected attacks
     float mouseSpeed            = 6.0f;   // right-stick -> mouse px/frame
     float stickDeadzone         = 0.2f;

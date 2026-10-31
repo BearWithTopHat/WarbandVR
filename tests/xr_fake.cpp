@@ -50,6 +50,10 @@ namespace
     int g_suggestedBindings = 0;
     int g_destroyedSpaces = 0;
     int g_destroyedSets = 0;
+    int g_hapticCount = 0;
+    float g_hapticAmplitude = 0.0f;
+    int64_t g_hapticDuration = 0;
+    int g_hapticHand = -1;
 
     std::string Key(XrAction action, XrPath sub)
     {
@@ -92,6 +96,7 @@ namespace XrFake
         g_syncResult = XR_SUCCESS; g_locateResult = XR_SUCCESS;
         g_syncCount = 0; g_attachedSets = 0; g_suggestedBindings = 0;
         g_destroyedSpaces = 0; g_destroyedSets = 0;
+        g_hapticCount = 0; g_hapticAmplitude = 0.0f; g_hapticDuration = 0; g_hapticHand = -1;
     }
 
     static std::string StateKey(const char* action, Hand hand)
@@ -140,6 +145,10 @@ namespace XrFake
         for (size_t i=0;i<g_actions.size();++i) { if (i) ss << ","; ss << g_actions[i].name; }
         return ss.str();
     }
+    int HapticCount() { return g_hapticCount; }
+    float LastHapticAmplitude() { return g_hapticAmplitude; }
+    long long LastHapticDuration() { return (long long)g_hapticDuration; }
+    int LastHapticHand() { return g_hapticHand; }
 }
 
 extern "C" XrResult xrStringToPath(XrInstance, const char* pathString, XrPath* outPath)
@@ -270,5 +279,17 @@ extern "C" XrResult xrDestroySpace(XrSpace space)
 extern "C" XrResult xrDestroyActionSet(XrActionSet)
 {
     ++g_destroyedSets;
+    return XR_SUCCESS;
+}
+
+extern "C" XrResult xrApplyHapticFeedback(XrSession, const XrHapticActionCreateInfo* ci,
+                                          const XrHapticBaseHeader* ev)
+{
+    if (!ci || !ev || ev->type != XR_TYPE_HAPTIC_VIBRATION) return -1;
+    const XrHapticVibration* v = (const XrHapticVibration*)ev;
+    ++g_hapticCount;
+    g_hapticAmplitude = v->amplitude;
+    g_hapticDuration = v->duration;
+    g_hapticHand = HandFromSub(ci->subactionPath);
     return XR_SUCCESS;
 }

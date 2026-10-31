@@ -27,4 +27,8 @@ namespace XrFake
     int DestroyedActionSets();
     bool HasAction(const char* name);
     std::string ActionsCreated();
+    int HapticCount();
+    float LastHapticAmplitude();
+    long long LastHapticDuration();
+    int LastHapticHand();
 }
