@@ -105,6 +105,35 @@ namespace Melee
         *dx = cx; *dy = cy;
     }
 
+    // Total absolute direction change of a swing's velocity trajectory in
+    // radians, over the window. Straight swings score ~0; curved arcs and
+    // direction flips score high. Used only to break near-tie
+    // classifications, never to change the four-direction ceiling.
+    inline float TrajectoryCurvature(const Sample* ring, int ringSize,
+                                     unsigned long long now, unsigned long long windowMs)
+    {
+        float total = 0.0f;
+        bool havePrev = false;
+        float px = 0, py = 0, pz = 0;
+        for (int i = 0; i < ringSize; ++i)
+        {
+            const Sample& s = ring[i];
+            if (s.tMs == 0 || now - s.tMs > windowMs) continue;
+            const float sp = Speed(s.vx, s.vy, s.vz);
+            if (sp < 0.2f) continue; // near-still samples carry no direction
+            if (havePrev)
+            {
+                const float pp = Speed(px, py, pz);
+                const float dot = (px * s.vx + py * s.vy + pz * s.vz) / (pp * sp);
+                const float clamped = dot < -1.0f ? -1.0f : (dot > 1.0f ? 1.0f : dot);
+                total += acosf(clamped);
+            }
+            px = s.vx; py = s.vy; pz = s.vz;
+            havePrev = true;
+        }
+        return total;
+    }
+
     // Distance between the two controllers in app space (metres). Used by
     // the physical two-hand bow draw.
     inline float HandDistance(const float* left, const float* right)

@@ -312,6 +312,27 @@ static void TestFindPeak()
     CHECK(!Melee::FindPeak(ring, 4, 1000, 600, 5.0f, &peak));
 }
 
+static void TestTrajectoryCurvature()
+{
+    Melee::Sample ring[4] = {};
+    // Straight trajectory: same direction every sample -> zero curvature.
+    ring[0] = { 1.0f, 0.0f, 0.0f, 1000 };
+    ring[1] = { 2.0f, 0.0f, 0.0f, 1010 };
+    ring[2] = { 3.0f, 0.0f, 0.0f, 1020 };
+    CHECK(Near(Melee::TrajectoryCurvature(ring, 3, 1030, 600), 0.0f));
+    // One 90-degree turn: x+ then y+.
+    ring[0] = { 1.0f, 0.0f, 0.0f, 1000 };
+    ring[1] = { 0.0f, 1.0f, 0.0f, 1010 };
+    ring[2] = { 1.0f, 0.0f, 0.0f, 1020 };
+    const float c = Melee::TrajectoryCurvature(ring, 3, 1030, 600);
+    CHECK(c > 3.0f && c < 3.3f); // two 90-degree turns ~ pi
+    // Stale samples and still samples are ignored.
+    ring[0] = { 5.0f, 0.0f, 0.0f, 100 };
+    ring[1] = { 0.1f, 0.0f, 0.0f, 1020 };
+    ring[2] = { 0.0f, 0.0f, 0.0f, 0 };
+    CHECK(Near(Melee::TrajectoryCurvature(ring, 3, 1030, 600), 0.0f));
+}
+
 static void TestSteerRelease()
 {
     using namespace Melee;
@@ -545,6 +566,7 @@ int main()
     TestVelocityToView();
     TestClassifySwing();
     TestFindPeak();
+    TestTrajectoryCurvature();
     TestSteerRelease();
     TestSteerAndBeginDeltas();
     TestHandDistance();

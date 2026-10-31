@@ -481,12 +481,32 @@ namespace
             {
                 // Swing ended; classify from the peak-velocity sample in the window.
                 Sample peak{};
-                const bool havePeak = Melee::FindPeak(g_ring, 32, now, 600,
+                const bool havePeak = Melee::FindPeak(g_ring, 32, now,
+                                                      (unsigned long long)cfg.swingWindowMs,
                                                       cfg.swingThreshold, &peak);
                 g_swinging = false;
                 if (havePeak)
                 {
-                    const AttackDir dir = Melee::ClassifySwing(peak.vx, peak.vy, peak.vz);
+                    AttackDir dir = Melee::ClassifySwing(peak.vx, peak.vy, peak.vz);
+
+                    // Near-tie assist: when two axes are close, a mostly
+                    // straight trajectory (low curvature) is a thrust, not
+                    // a side slash. The four-direction ceiling is unchanged.
+                    if (cfg.swingCurvatureAssist && dir != Melee::DIR_NONE)
+                    {
+                        const float ax = fabsf(peak.vx), ay = fabsf(peak.vy), az = fabsf(peak.vz);
+                        const float hi = ax > ay ? (ax > az ? ax : az) : (ay > az ? ay : az);
+                        const float lo = ax < ay ? (ax < az ? ax : az) : (ay < az ? ay : az);
+                        const float mid = ax + ay + az - hi - lo;
+                        if (hi > 1e-3f && mid / hi > 0.8f)
+                        {
+                            const float curv = Melee::TrajectoryCurvature(
+                                g_ring, 32, now, (unsigned long long)cfg.swingWindowMs);
+                            if (curv < 0.5f && az > 0.4f * ax)
+                                dir = DIR_THRUST;
+                        }
+                    }
+
                     if (dir != Melee::DIR_NONE)
                     {
                         BeginAttack(dir);

@@ -360,6 +360,17 @@ int main()
     Frame(1210);
     CHECK(XrFake::HapticCount() >= 2); // release pulse too
 
+    // --- near-tie trajectory assist: straight near-tie becomes a thrust -----
+    Restart();
+    Config::Get().motionMelee = true;
+    // vx=1.5, vz=1.4: dominant-axis would be RIGHT (ax >= az), but the
+    // trajectory is nearly straight, so the assist must choose THRUST.
+    XrFake::SetVelocity(XrFake::Right, 1.5f, 0.0f, -1.4f, true);
+    Frame(1000);
+    XrFake::SetVelocity(XrFake::Right, 0.0f, 0.0f, 0.0f, true);
+    Frame(1010);
+    CHECK(g_rec.Has("M0,80")); // thrust delta, not right slash
+
     // --- grip block hold-time ----------------------------------------------
     Restart();
     Config::Get().motionMelee = true;

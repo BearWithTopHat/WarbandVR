@@ -58,6 +58,8 @@ struct Config
     bool  emulateControllers    = true;   // controllers emulate kb/mouse
     bool  motionMelee           = false;  // swing-to-attack injection
     float swingThreshold        = 1.8f;   // m/s to start a swing
+    int   swingWindowMs         = 600;    // peak-classification window (ms)
+    bool  swingCurvatureAssist  = true;   // straight-trajectory tie-break to thrust
     float blockHoldTime         = 0.15f;  // s of grip hold before block engages
     bool  blockForearm          = true;   // left forearm raised = physical block
     bool  haptics               = true;   // haptic pulses on swing/block/bow release

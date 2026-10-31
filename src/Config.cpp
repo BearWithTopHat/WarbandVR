@@ -129,6 +129,8 @@ void Config::Load()
     emulateControllers   = GetBool(path, "Input", "EmulateControllers", emulateControllers);
     motionMelee          = GetBool(path, "Input", "MotionMelee", motionMelee);
     swingThreshold       = GetFloat(path, "Input", "SwingThreshold", swingThreshold);
+    swingWindowMs        = GetPrivateProfileIntA("Input", "SwingWindowMs", swingWindowMs, path);
+    swingCurvatureAssist = GetBool(path, "Input", "SwingCurvatureAssist", swingCurvatureAssist);
     blockHoldTime        = GetFloat(path, "Input", "BlockHoldTime", blockHoldTime);
     blockForearm         = GetBool(path, "Input", "BlockForearm", blockForearm);
     haptics              = GetBool(path, "Input", "Haptics", haptics);
