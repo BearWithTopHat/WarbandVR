@@ -106,6 +106,16 @@ Check in order:
 5. Slow path first: `SharedSurface=0`.
 6. Steam Link streaming already works for the flat game.
 
+### Using the laser pointer in menus
+
+With `[Output] PointerMenus=1` (default), aiming the right controller at a
+menu or the campaign map moves the cursor and shows a crosshair; the right
+trigger clicks. It only activates while the view is static (menus/map), so
+it never fights normal combat input. The pointer is computed from the
+controller's ray intersecting the view plane at 1 m and mapped with the
+game's own projection into the UI's logical coordinates, then injected as
+absolute mouse positions. `PointerMenus=0` restores stick-only mouse look.
+
 ### A menu item highlights even when the cursor is outside it
 
 That's a cursor-coordinate mismatch, not a rendering bug: the game hit-tests

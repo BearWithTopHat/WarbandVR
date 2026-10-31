@@ -42,6 +42,8 @@ struct Config
     bool  sbsMouseRemap         = true;   // remap cursor coords to the game's
                                           // full-window logical space (fixes
                                           // hover/hit-test in split panels)
+    bool  pointerMenus          = true;   // controller laser-pointer menus
+                                          // (ray -> logical cursor + crosshair)
     bool  forceNoVsync          = true;   // force present-interval immediate when
                                           // OutputMode=1 (XR pacing owns the rate)
     bool  cinemaMode            = false;  // fixed quad layer instead of immersive

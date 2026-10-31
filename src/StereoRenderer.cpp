@@ -8,6 +8,8 @@
 #include "OneEuroFilter.h"
 #include "Comfort.h"
 #include "MouseMap.h"
+#include "MotionInput.h"
+#include "ViewState.h"
 
 #include <cstring>
 #include <algorithm>
@@ -158,6 +160,8 @@ void StereoRenderer::CreateResources(IDirect3DDevice9* device)
     }
     m_eyeW = w;
     m_eyeH = h;
+    ViewState::g_eyeW = w;
+    ViewState::g_eyeH = h;
     m_needClear = true;
     LOG_INFO("StereoRenderer: per-eye targets %ux%u (depth fmt=%d, shared=%d) created",
              w, h, dsFmt, m_eyeShared[0] ? 1 : 0);
@@ -183,6 +187,7 @@ void StereoRenderer::ReleaseResources()
     m_hasLastAppliedVp = false;
     m_hasLastAppliedScissor = false;
     m_eyeW = m_eyeH = 0;
+    ViewState::g_eyeW = ViewState::g_eyeH = 0;
     m_curRT = nullptr;
     m_curRTIsMain = false;
     m_diverted.clear();
@@ -416,10 +421,52 @@ void StereoRenderer::RenderComfortVignette(IDirect3DDevice9* device)
     saved.Restore(device);
 }
 
+void StereoRenderer::RenderPointerCrosshair(IDirect3DDevice9* device)
+{
+    int x = 0, y = 0;
+    const bool havePointer = m_pointerOverlay || MotionInput::GetPointerLogical(&x, &y);
+    if (!havePointer) return;
+    if (m_pointerOverlay) { x = m_pointerX; y = m_pointerY; }
+    if (!m_eyeSurf[0] || !m_eyeSurf[1]) return;
+
+    // Small RHW crosshair (two bars) in logical window coords, identical in
+    // both eyes so it lines up with the UI duplication.
+    struct V { float x, y, z, rhw; DWORD color; };
+    const DWORD col = 0xFF40C0FFu;
+    const float cx = (float)x, cy = (float)y;
+    const float L = 10.0f, T = 1.5f;
+    const V quad[8] = {
+        { cx - L, cy - T, 0.0f, 1.0f, col }, { cx + L, cy - T, 0.0f, 1.0f, col },
+        { cx - L, cy + T, 0.0f, 1.0f, col }, { cx + L, cy + T, 0.0f, 1.0f, col },
+        { cx - T, cy - L, 0.0f, 1.0f, col }, { cx + T, cy - L, 0.0f, 1.0f, col },
+        { cx - T, cy + L, 0.0f, 1.0f, col }, { cx + T, cy + L, 0.0f, 1.0f, col },
+    };
+
+    OverlayState saved;
+    saved.Save(device);
+    device->SetTexture(0, nullptr);
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    for (int eye = 0; eye < 2; ++eye)
+    {
+        device->SetRenderTarget(0, m_eyeSurf[eye]);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad + 4, sizeof(quad[0]));
+    }
+    saved.Restore(device);
+}
+
 void StereoRenderer::OnEndScene(IDirect3DDevice9* device)
 {
     if (m_active)
+    {
         RenderComfortVignette(device);
+        RenderPointerCrosshair(device);
+    }
 
     // Perf rollup: every 600 frames report average duplication cost.
     ++m_frameCount;
@@ -606,10 +653,15 @@ void StereoRenderer::CaptureViewMatrix(const D3DMATRIX& m)
 {
     // Menu-lock bookkeeping: note when the view last actually changed.
     if (!m_hasView || memcmp(&m_baseView, &m, sizeof(D3DMATRIX)) != 0)
+    {
         m_lastViewChangeTick = GetTickCount64();
+        ViewState::g_lastViewChangeTick = m_lastViewChangeTick;
+    }
 
     m_baseView = m;
     m_hasView  = true;
+    ViewState::g_view = m_baseView;
+    ViewState::g_hasView = true;
     ++m_viewCaptures;
 
     int limit = Config::Get().logViewMatrices;
@@ -626,6 +678,8 @@ void StereoRenderer::CaptureProjectionMatrix(const D3DMATRIX& m)
 {
     m_baseProj = m;
     m_hasProj  = true;
+    ViewState::g_proj = m_baseProj;
+    ViewState::g_hasProj = true;
 }
 
 void StereoRenderer::SetGameViewport(const D3DVIEWPORT9& vp)

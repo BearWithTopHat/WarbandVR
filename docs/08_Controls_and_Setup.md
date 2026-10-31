@@ -39,6 +39,7 @@
 | MirrorOnDesktop | 0 | Spectator SBS on the monitor while in VR. |
 | SBSAspectCorrect | 1 | Letterbox per-eye images into split panels (preserves menu proportions); 0 = stretch to fill. |
 | SBSMouseRemap | 1 | Remap split-panel cursor coords to the game's full-window logical space (correct hover/click targets). |
+| PointerMenus | 1 | Controller laser-pointer menus: aim to move cursor, trigger to click (menus/map only). |
 | ForceNoVsync | 1 | Force present-interval immediate under OutputMode=1. |
 | CinemaMode | 0 | Fixed quad "diorama" display instead of immersive projection. Pair with HeadTracking=0. |
 | FramePacing | 0 | 0 = xrWaitFrame paces the game thread; 1 = free-run, XR gets one frame per display period. Try 1 for periodic stutter. |

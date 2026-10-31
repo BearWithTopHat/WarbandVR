@@ -111,7 +111,18 @@ Any example that passes `2`, `3`, or another slot directly to those operations
 is stale and wrong. `tools/check_companion.py` enforces the correct
 `agent_get_item_slot` → item-id pattern.
 
-## 6. Manual crossbow reload ritual
+## 6. Laser-pointer menus
+
+`[Output] PointerMenus=1` (default) turns the right controller into a laser
+pointer for menus, the campaign map, and other view-static screens. The ray
+from the controller's grip pose (position + orientation) is intersected with
+the view plane at 1 m and mapped through the game's own projection into the
+UI's full-window logical coordinates. The cursor is then driven with
+absolute `SendInput` positions, and a small crosshair is drawn into both eye
+targets at that logical spot. The right trigger clicks. It only activates
+while the view is static, so it never interferes with combat input.
+
+## 7. Manual crossbow reload ritual
 
 Warband reloads are timed animations, not separate mechanical engine states.
 The companion therefore implements a permission ritual rather than pretending

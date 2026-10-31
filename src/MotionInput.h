@@ -26,4 +26,9 @@ namespace MotionInput
 
     // Called once per submitted frame (from OpenXRBridge::SubmitFrame).
     void OnFrame();
+
+    // Laser-pointer state: true when the controller pointer is driving the
+    // cursor (menus/map only), plus the logical full-window coordinates.
+    // Crosshair rendering in StereoRenderer reads this every frame.
+    bool GetPointerLogical(int* x, int* y);
 }

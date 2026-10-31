@@ -13,6 +13,7 @@
 #include "OneEuroFilter.h"
 #include "Comfort.h"
 #include "MouseMap.h"
+#include "PointerMath.h"
 
 #include <cstdio>
 #include <cmath>
@@ -529,6 +530,26 @@ static void TestMouseMap()
     CHECK(ly < 0); // above the letterboxed image
 }
 
+static void TestPointerMath()
+{
+    const float pos[3] = { 0.0f, 0.0f, 0.0f };
+    const float flip[4] = { 0.0f, 1.0f, 0.0f, 0.0f }; // 180 deg yaw: dir -> +Z
+    int x = 0, y = 0;
+    const Mat4 id = MatPure::Identity();
+    const Mat4 proj = TestProj();
+    CHECK(PointerMath::ComputePointerLogical(pos, flip, id, proj, 1600, 900, &x, &y));
+    CHECK(x == 800 && y == 450); // centered forward ray maps to window center
+
+    const float away[4] = { 0.0f, 0.0f, 0.0f, 1.0f }; // identity: dir -> -Z
+    CHECK(!PointerMath::ComputePointerLogical(pos, away, id, proj, 1600, 900, &x, &y));
+
+    // Off-axis ray beyond the frustum edge clamps to the window edge.
+    const float offPos[3] = { 0.5f, 0.0f, 0.0f };
+    const float offQuat[4] = { 0.0f, 0.9238795f, 0.0f, 0.3826834f }; // 135 deg yaw
+    CHECK(PointerMath::ComputePointerLogical(offPos, offQuat, id, proj, 1600, 900, &x, &y));
+    CHECK(x == 0 && y == 450); // far off-axis clamps to left edge
+}
+
 static void TestComfort()
 {
     float scale = 0.0f;
@@ -574,6 +595,7 @@ int main()
     TestParse();
     TestOneEuro();
     TestMouseMap();
+    TestPointerMath();
     TestComfort();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);

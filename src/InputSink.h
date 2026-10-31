@@ -12,6 +12,8 @@ struct IInputSink
     virtual void Key(int vk, bool down) = 0;
     virtual void MouseButton(bool left, bool down) = 0;
     virtual void MouseMove(int dx, int dy) = 0;
+    // Absolute cursor position in normalized SendInput coordinates (0..65535).
+    virtual void MouseMoveAbsolute(int x, int y) = 0;
 };
 
 namespace InputSink

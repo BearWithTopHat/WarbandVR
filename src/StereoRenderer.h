@@ -29,6 +29,7 @@
 // class touches nothing and the game is byte-for-byte stock.
 
 #include <d3d9.h>
+#include "ViewState.h"
 #include <windows.h>
 #include <deque>
 #include <utility>
@@ -115,6 +116,27 @@ public:
     void ReleaseAllShadows();
     bool EnsureShadowDepth(IDirect3DDevice9* device, SurfaceShadow& s, IDirect3DSurface9* gameDS);
     bool ShadowActive() const { return m_shadowActive != nullptr; }
+    // Current captured view/projection for pointer math (false if none yet).
+    bool GetViewMatrices(D3DMATRIX* view, D3DMATRIX* proj) const
+    {
+        if (view) *view = m_baseView;
+        if (proj) *proj = m_baseProj;
+        return m_hasView && m_hasProj;
+    }
+    // True when the captured view has not changed for `ms` (menu/map heuristic).
+    bool ViewIsStatic(unsigned long long ms) const
+    {
+        return (GetTickCount64() - ViewState::g_lastViewChangeTick) > ms;
+    }
+
+    // Laser-pointer overlay state (set by MotionInput; tests may set it
+    // directly to exercise the crosshair without an XR session).
+    void SetPointerOverlay(bool active, int x, int y)
+    {
+        m_pointerOverlay = active;
+        m_pointerX = x;
+        m_pointerY = y;
+    }
     HRESULT ClearBothEyes(IDirect3DDevice9* device, DWORD count, const D3DRECT* rects,
                           DWORD flags, D3DCOLOR color, float z, DWORD stencil);
 
@@ -126,6 +148,7 @@ private:
     void CompositeToBackbuffer(IDirect3DDevice9* device);
     void ClearEyeTargets(IDirect3DDevice9* device);
     void RenderComfortVignette(IDirect3DDevice9* device);
+    void RenderPointerCrosshair(IDirect3DDevice9* device);
     bool EnsureVignetteTexture(IDirect3DDevice9* device);
 
     // M4: compose head pose delta onto the captured view (identity if
@@ -197,6 +220,10 @@ private:
     bool         m_hasLastAppliedVp   = false;
     RECT         m_lastAppliedScissor = {};
     bool         m_hasLastAppliedScissor = false;
+
+    // Laser-pointer overlay (menus): logical crosshair position + active flag.
+    bool m_pointerOverlay = false;
+    int  m_pointerX = 0, m_pointerY = 0;
 
     // Perf accumulators (reported every 600 frames at LogLevel>=2)
     double             m_dupTimeUs   = 0.0;

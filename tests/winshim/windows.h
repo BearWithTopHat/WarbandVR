@@ -176,6 +176,7 @@ typedef long (__stdcall *PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS);
 #define EXCEPTION_PRIV_INSTRUCTION    0xC0000096u
 #define EXCEPTION_CONTINUE_SEARCH     0
 #define MOVEFILE_REPLACE_EXISTING     0x1u
+#define MOUSEEVENTF_ABSOLUTE          0x8000u
 extern "C" {
 void* AddVectoredExceptionHandler(unsigned long first, PVECTORED_EXCEPTION_HANDLER handler);
 unsigned long RemoveVectoredExceptionHandler(void* handle);

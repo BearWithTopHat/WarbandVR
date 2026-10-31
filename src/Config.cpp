@@ -121,6 +121,7 @@ void Config::Load()
     mirrorOnDesktop      = GetBool(path, "Output", "MirrorOnDesktop", mirrorOnDesktop);
     sbsAspectCorrect     = GetBool(path, "Output", "SBSAspectCorrect", sbsAspectCorrect);
     sbsMouseRemap        = GetBool(path, "Output", "SBSMouseRemap", sbsMouseRemap);
+    pointerMenus         = GetBool(path, "Output", "PointerMenus", pointerMenus);
     forceNoVsync         = GetBool(path, "Output", "ForceNoVsync", forceNoVsync);
     cinemaMode           = GetBool(path, "Output", "CinemaMode", cinemaMode);
     framePacing          = GetPrivateProfileIntA("Output", "FramePacing", framePacing, path);

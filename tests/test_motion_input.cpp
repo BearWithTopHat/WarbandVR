@@ -36,6 +36,10 @@ namespace
         {
             char b[64]; snprintf(b, sizeof(b), "M%d,%d", dx, dy); events.push_back(b);
         }
+        void MouseMoveAbsolute(int x, int y) override
+        {
+            char b[64]; snprintf(b, sizeof(b), "A%d,%d", x, y); events.push_back(b);
+        }
         int Count(const char* exact) const
         {
             int n = 0; for (const std::string& e : events) if (e == exact) ++n; return n;

@@ -46,6 +46,9 @@
 #include "MeleeCore.h"
 #include "GestureZones.h"
 #include "InputSink.h"
+#include "PointerMath.h"
+#include "MathUtil.h"
+#include "ViewState.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -66,6 +69,7 @@ namespace
         void Key(int, bool) override {}
         void MouseButton(bool, bool) override {}
         void MouseMove(int, int) override {}
+        void MouseMoveAbsolute(int, int) override {}
     };
     NullSink   g_nullSink;
     IInputSink* g_sink = &g_nullSink;
@@ -138,6 +142,9 @@ namespace
     unsigned long long g_bothGripSince = 0;
     bool   g_twoHandSent = false;
     bool   g_triggerPrev = false;
+    // Laser-pointer state (menus/map only).
+    bool   g_pointerActive = false;
+    int    g_pointerX = 0, g_pointerY = 0;
     // Recenter chord (left stick click hold). Cancelled by right-stick motion
     // so look input never accidentally recenters; fires once per press.
     unsigned long long g_l3Since = 0;
@@ -179,6 +186,15 @@ namespace
             in.mi.dwFlags = MOUSEEVENTF_MOVE;
             in.mi.dx = dx;
             in.mi.dy = dy;
+            SendInput(1, &in, sizeof(INPUT));
+        }
+        void MouseMoveAbsolute(int x, int y) override
+        {
+            INPUT in{};
+            in.type = INPUT_MOUSE;
+            in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+            in.mi.dx = x < 0 ? 0 : (x > 65535 ? 65535 : x);
+            in.mi.dy = y < 0 ? 0 : (y > 65535 ? 65535 : y);
             SendInput(1, &in, sizeof(INPUT));
         }
     };
@@ -292,6 +308,28 @@ namespace
 
     bool ReadHandPose(Hand h, float* pos)     { return LocateHand(h, pos, nullptr); }
     bool ReadHandVelocity(Hand h, float* vel) { return LocateHand(h, nullptr, vel); }
+
+    // Pose + orientation in one locate (pointer needs both).
+    bool ReadHandPoseFull(Hand h, float* pos, float* quat)
+    {
+        if (g_handSpace[h] == XR_NULL_HANDLE) return false;
+        XrSpace appSpace = (XrSpace)OpenXRBridge::XrAppSpaceHandle();
+        XrTime time = (XrTime)OpenXRBridge::PredictedDisplayTime();
+        if (!appSpace || !time) return false;
+        XrSpaceLocation loc{ XR_TYPE_SPACE_LOCATION };
+        if (XR_FAILED(xrLocateSpace(g_handSpace[h], appSpace, time, &loc)))
+            return false;
+        if ((loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0)
+            return false;
+        pos[0] = loc.pose.position.x;
+        pos[1] = loc.pose.position.y;
+        pos[2] = loc.pose.position.z;
+        quat[0] = loc.pose.orientation.x;
+        quat[1] = loc.pose.orientation.y;
+        quat[2] = loc.pose.orientation.z;
+        quat[3] = loc.pose.orientation.w;
+        return true;
+    }
 
     // Grab-zone classification lives in GestureZones.h (pure, unit-tested);
     // zones are head-relative boxes in app space (+X right, +Y up, -Z fwd).
@@ -725,10 +763,26 @@ namespace
             g_twoHandSent = false;
         }
 
+        // --- pointer click in menus (laser pointer owns the trigger) --------
+        if (g_pointerActive)
+        {
+            float trig = 0;
+            if (ReadFloat(g_trigger, RIGHT, &trig))
+            {
+                const bool down = trig > 0.5f;
+                if (down != g_triggerPrev)
+                {
+                    SendMouseButton(true, down);
+                    g_mouseBtn[0] = down;
+                    g_triggerPrev = down;
+                    LOG_INFO("[GESTURE] pointer click %s", down ? "down" : "up");
+                }
+            }
+        }
         // --- bow draw: trigger hold = LMB hold (draw), release = loose -------
         // Lets bows/crossbows work by physically holding the draw. Melee
         // swings still use the classifier on the right hand.
-        if (cfg.attackHoldTrigger)
+        else if (cfg.attackHoldTrigger)
         {
             float trig = 0;
             if (ReadFloat(g_trigger, RIGHT, &trig))
@@ -948,6 +1002,8 @@ void MotionInput::Shutdown()
     g_l3Cancelled = false;
     g_l3Fired = false;
     s_lastFrameMs = 0; // dt state must not leak across session restarts
+    g_pointerActive = false;
+    g_pointerX = g_pointerY = 0;
 
     for (int h = 0; h < 2; ++h)
         if (g_handSpace[h]) xrDestroySpace(g_handSpace[h]);
@@ -993,6 +1049,38 @@ void MotionInput::OnFrame()
 
     const Config& cfg = Config::Get();
     unsigned long long nowMs = GetTickCount64();
+
+    // Laser pointer (menus/map only): compute before any layer so click
+    // handling below sees the current state. View-static is the menu
+    // heuristic already used for tracking lock.
+    g_pointerActive = false;
+    if (cfg.pointerMenus && cfg.outputMode == 0 && cfg.enableStereo &&
+        (GetTickCount64() - ViewState::g_lastViewChangeTick > 250))
+    {
+        float pos[3], quat[4];
+        if (ReadHandPoseFull(RIGHT, pos, quat))
+        {
+            if (ViewState::g_hasView && ViewState::g_hasProj)
+            {
+                const int eyeW = (int)ViewState::g_eyeW;
+                const int eyeH = (int)ViewState::g_eyeH;
+                int lx = 0, ly = 0;
+                if (PointerMath::ComputePointerLogical(pos, quat,
+                                                       MatFromD3D(ViewState::g_view),
+                                                       MatFromD3D(ViewState::g_proj),
+                                                       eyeW, eyeH, &lx, &ly)
+                    && eyeW > 0 && eyeH > 0)
+                {
+                    g_pointerActive = true;
+                    g_pointerX = lx;
+                    g_pointerY = ly;
+                    InputSink::Get().MouseMoveAbsolute(lx * 65535 / eyeW,
+                                                       ly * 65535 / eyeH);
+                }
+            }
+        }
+    }
+
     // Frame-time factor for all rate-based injection (dt * 60, clamped).
     float dt = 1.0f / 60.0f;
     if (s_lastFrameMs != 0)
@@ -1057,9 +1145,18 @@ void MotionInput::OnFrame()
     }
 }
 
+bool MotionInput::GetPointerLogical(int* x, int* y)
+{
+    if (!g_pointerActive) return false;
+    if (x) *x = g_pointerX;
+    if (y) *y = g_pointerY;
+    return true;
+}
+
 #else
 // --- stubs (non-OpenXR build) ------------------------------------------------
 bool MotionInput::Init() { return false; }
 void MotionInput::Shutdown() {}
 void MotionInput::OnFrame() {}
+bool MotionInput::GetPointerLogical(int*, int*) { return false; }
 #endif

@@ -169,6 +169,8 @@
     <ClInclude Include="src\OpenXRBridge.h" />
     <ClInclude Include="src\MotionInput.h" />
     <ClInclude Include="src\MouseMap.h" />
+    <ClInclude Include="src\PointerMath.h" />
+    <ClInclude Include="src\ViewState.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="WarbandVR.def" />

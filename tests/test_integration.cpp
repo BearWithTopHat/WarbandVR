@@ -369,6 +369,13 @@ int main()
     CHECK(dev.textures[0] == cowTex);
     Config::Get().offscreenPasses = false;
 
+    // --- laser-pointer crosshair renders into both eyes --------------------
+    StereoRenderer::Get().SetPointerOverlay(true, 400, 300);
+    Fake::Clear();
+    hkEndScene(&dev);
+    CHECK(Fake::Count("DrawPrimitiveUP") == 4); // two bars per eye
+    StereoRenderer::Get().SetPointerOverlay(false, 0, 0);
+
     // --- Reset releases DEFAULT-pool eyes, then rebuilds at the new size ----
     D3DPRESENT_PARAMETERS pp2 = dev.pp;
     pp2.BackBufferWidth = 800; pp2.BackBufferHeight = 600;
